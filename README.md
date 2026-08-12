@@ -13,7 +13,7 @@ Open `index.html` directly in a browser (Chrome, Edge, Safari, or Firefox), then
 ## Features
 
 - **Live dot-grid shader** — fragment-shader halftone; uniform grid, perfect circles, luminance-driven size/opacity, temporal smoothing to prevent flicker.
-- **Source controls** — upload, play/pause, restart, loop, speed, scale, position, and fit (Contain keeps the source's true aspect ratio inside the frame; Cover fills it).
+- **Source** — a single upload that auto-detects the file: **video** (MP4/WebM/…) or **image** (PNG, JPEG, animated GIF, SVG). Plus play/pause, restart, loop, speed, scale, position, and fit (Contain keeps the source's true aspect ratio inside the frame; Cover fills it).
 - **Dot grid** — dot spacing (distance between dots) and dot size in pixels, fully decoupled so spacing never changes dot size.
 - **Image processing** — brightness, contrast, gamma, source blur, temporal smoothing, invert luminance.
 - **Mask / background removal** — luminance cutoff + feather, invert, mask preview, and a **green-screen (chroma key)** with adjustable key color, tolerance, and feather.

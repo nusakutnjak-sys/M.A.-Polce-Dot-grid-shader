@@ -297,6 +297,21 @@ gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
 
 const video = document.getElementById("srcVideo");
 let haveVideo = false, srcW=512, srcH=512;
+let srcKind = null; // 'video' | 'image' | null (placeholder)
+
+// image source (PNG / JPEG / GIF / SVG). Drawn each frame so animated GIFs play.
+const imgEl = new Image(); imgEl.decoding="async";
+imgEl.style.cssText="position:fixed;left:-99999px;top:0"; // stay in render tree so GIFs animate
+document.body.appendChild(imgEl);
+const imgCanvas = document.createElement("canvas"); const ictx = imgCanvas.getContext("2d");
+let imgReady = false;
+imgEl.onload = ()=>{
+  let w=imgEl.naturalWidth, h=imgEl.naturalHeight;
+  if(!w||!h){ w=h=512; }                       // e.g. an SVG with no intrinsic size
+  const cap=1280, s=Math.min(1, cap/Math.max(w,h));
+  imgCanvas.width=Math.max(1,Math.round(w*s)); imgCanvas.height=Math.max(1,Math.round(h*s));
+  imgReady=true; smoothPrimed=false;
+};
 
 const ph = document.createElement("canvas"); ph.width=ph.height=512;
 const pctx = ph.getContext("2d"); let phT = 0;
@@ -309,10 +324,16 @@ function drawPlaceholder(){
   pctx.fillStyle=g; pctx.beginPath(); pctx.arc(cx,cy,200,0,Math.PI*2); pctx.fill();
 }
 function uploadSource(){
-  if(haveVideo && video.readyState >= 2){
+  if(srcKind==="video" && haveVideo && video.readyState >= 2){
     srcW=video.videoWidth||512; srcH=video.videoHeight||512;
     gl.bindTexture(gl.TEXTURE_2D, srcTex);
     gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE, video);
+  } else if(srcKind==="image" && imgReady){
+    ictx.clearRect(0,0,imgCanvas.width,imgCanvas.height);
+    ictx.drawImage(imgEl, 0,0, imgCanvas.width, imgCanvas.height); // current GIF frame for animation
+    srcW=imgCanvas.width; srcH=imgCanvas.height;
+    gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE, imgCanvas);
   } else {
     drawPlaceholder(); srcW=512; srcH=512;
     gl.bindTexture(gl.TEXTURE_2D, srcTex);
@@ -477,7 +498,7 @@ const SECTIONS = [
     {t:"note", html:"Your settings are remembered automatically and restored when you reopen this file. Use <b>Save as…</b> to keep several named looks, or <b>⬇ .json</b> to back them up."},
   ]],
   ["Source", [
-    {t:"file", l:"Upload video", accept:"video/*", onfile:loadSourceVideo},
+    {t:"file", l:"Upload source (video or image)", accept:"video/*,image/*", onfile:loadSource},
     {t:"buttons", buttons:[{l:"Play / Pause",fn:togglePlay},{l:"Restart",fn:()=>{video.currentTime=0; if(haveVideo)video.play();}}]},
     {t:"check", k:"srcLoop", l:"Loop", onchange:v=>video.loop=v},
     {t:"range", k:"srcSpeed", l:"Speed", min:0.1,max:3,step:0.05, onchange:v=>video.playbackRate=v},
@@ -600,6 +621,7 @@ function makeControl(c){
     const wrap=document.createElement("label"); wrap.className="filebtn"; wrap.textContent="⤒ "+c.l;
     const inp=document.createElement("input"); inp.type="file"; inp.accept=c.accept;
     const fn=document.createElement("div"); fn.className="fname";
+    wrap.style.flex="1 1 100%"; fn.style.flex="1 1 100%"; // full-width button, filename below
     inp.onchange=e=>{ const f=e.target.files[0]; if(f){ c.onfile(f); fn.textContent=f.name; } };
     wrap.appendChild(inp); row.style.flexWrap="wrap"; row.append(wrap,fn);
   }
@@ -654,7 +676,21 @@ let gradientEditorRef=null;
 function loadSourceVideo(file){
   const url=URL.createObjectURL(file);
   video.src=url; video.loop=P.srcLoop; video.playbackRate=P.srcSpeed;
-  video.play().catch(()=>{}); haveVideo=true; smoothPrimed=false;
+  video.play().catch(()=>{}); haveVideo=true; srcKind="video"; smoothPrimed=false;
+}
+function loadSourceImage(file){
+  if(haveVideo) video.pause();
+  imgReady=false; srcKind="image";
+  imgEl.src=URL.createObjectURL(file);
+}
+// single upload action: auto-detect video vs image from type/extension
+function loadSource(file){
+  const t=(file.type||"").toLowerCase(), n=(file.name||"").toLowerCase();
+  const isVideo = t.indexOf("video/")===0 || /\.(mp4|webm|mov|m4v|ogv)$/.test(n);
+  const isImage = t.indexOf("image/")===0 || /\.(png|jpe?g|gif|svg|webp|avif|bmp)$/.test(n);
+  if(isVideo) loadSourceVideo(file);
+  else if(isImage) loadSourceImage(file);
+  else flash("Unsupported file — upload a video or image");
 }
 function togglePlay(){ if(!haveVideo)return; if(video.paused)video.play(); else video.pause(); }
 function loadBgImage(file){
