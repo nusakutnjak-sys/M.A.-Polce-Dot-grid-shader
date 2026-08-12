@@ -92,6 +92,8 @@
   .btnrow{display:flex;gap:6px;margin:8px 0}
   .btnrow button{flex:1}
   .hint{color:#5b626d;font-size:10px;margin:6px 0 2px}
+  .subhead{color:#727a86;font-size:10px;letter-spacing:.11em;text-transform:uppercase;
+    margin:14px 0 4px;padding-top:10px;border-top:1px solid var(--line)}
   .fname{color:#6d7480;font-size:10px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
   /* gradient editor */
@@ -153,7 +155,7 @@ const DEFAULTS = {
   // COMPOSITING
   shaderOpacity:1.0, blend:"normal",
   // EXPORT
-  exportW:1280, exportDur:3, exportFps:15,
+  exportW:1280, exportDur:3, exportFps:15, exportTransparent:true,
 };
 const clone = o => JSON.parse(JSON.stringify(o));
 let P = clone(DEFAULTS);
@@ -557,13 +559,21 @@ const SECTIONS = [
   ]],
   ["Export", [
     {t:"select", k:"exportW", l:"Resolution", opts:[["640","640 px"],["960","960 px"],["1280","1280 px"],["1920","1920 px (HD)"],["2560","2560 px"],["3840","3840 px (4K)"]], parse:parseInt},
+
+    {t:"sub", l:"Still image"},
+    {t:"check", k:"exportTransparent", l:"Transparent background"},
+    {t:"buttons", buttons:[{l:"⬇ Export PNG",fn:()=>runExport("png"),primary:true}]},
+    {t:"note", html:"One frame. <b>Transparent background</b> on = just the dots; off = bakes in the background."},
+
+    {t:"sub", l:"Animated & video"},
     {t:"range", k:"exportDur", l:"Duration", min:1,max:10,step:0.5, unit:"s"},
     {t:"select", k:"exportFps", l:"Frame rate", opts:[["10","10 fps"],["15","15 fps"],["20","20 fps"],["25","25 fps"],["30","30 fps"]], parse:parseInt},
-    {t:"buttons", buttons:[{l:"⬇ Transparent PNG",fn:()=>runExport("apng"),primary:true}]},
-    {t:"buttons", buttons:[{l:"⬇ Transparent GIF",fn:()=>runExport("gif")}]},
-    {t:"buttons", buttons:[{l:"⬇ MP4 video",fn:()=>runExport("mp4")},{l:"⬇ WebM",fn:()=>runExport("webm")}]},
-    {t:"buttons", buttons:[{l:"⬇ HTML code",fn:()=>runExport("code")},{l:"Copy code",fn:()=>runExport("copy")}]},
-    {t:"note", html:"<b>Transparent PNG</b> (APNG) &amp; <b>GIF</b> export the dot layer with transparency. <b>MP4 / WebM</b> include the background (set it to <b>Transparent</b> and use WebM to keep alpha — MP4 can't carry transparency). Higher resolutions take longer to encode."},
+    {t:"buttons", buttons:[{l:"⬇ Animated PNG",fn:()=>runExport("apng")},{l:"⬇ GIF",fn:()=>runExport("gif")}]},
+    {t:"buttons", buttons:[{l:"⬇ MP4",fn:()=>runExport("mp4")},{l:"⬇ WebM",fn:()=>runExport("webm")}]},
+    {t:"note", html:"PNG &amp; GIF = transparent dot layer, looping. MP4 &amp; WebM include the background."},
+
+    {t:"sub", l:"Embed code"},
+    {t:"buttons", buttons:[{l:"⬇ HTML file",fn:()=>runExport("code")},{l:"Copy",fn:()=>runExport("copy")}]},
   ]],
 ];
 
@@ -611,11 +621,10 @@ function makeControl(c){
     row.append(lab,spacer,hexIn,inp); row._set=v=>{inp.value=v; hexIn.value=v;};
   }
   else if(c.t==="check"){
-    const lab=document.createElement("label"); lab.textContent=c.l;
-    const spacer=document.createElement("span"); spacer.style.flex="1";
+    const lab=document.createElement("label"); lab.textContent=c.l; lab.style.flex="1 1 auto";
     const inp=document.createElement("input"); inp.type="checkbox"; inp.checked=!!P[c.k];
     inp.onchange=()=>{ P[c.k]=inp.checked; c.onchange&&c.onchange(P[c.k]); };
-    row.append(lab,spacer,inp); row._set=v=>inp.checked=!!v;
+    row.append(lab,inp); row._set=v=>inp.checked=!!v;
   }
   else if(c.t==="file"){
     const wrap=document.createElement("label"); wrap.className="filebtn"; wrap.textContent="⤒ "+c.l;
@@ -631,6 +640,7 @@ function makeControl(c){
     row.appendChild(bar);
   }
   else if(c.t==="note"){ row.innerHTML='<div class="hint" style="flex:1">'+c.html+'</div>'; }
+  else if(c.t==="sub"){ row.className="subhead"; row.textContent=c.l; }
   else if(c.t==="gradient"){ row.style.display="block"; row.appendChild(buildGradientEditor()); row._grad=true; }
   else if(c.t==="presets"){ row.style.display="block"; row.appendChild(buildPresetsUI()); }
   return row;
@@ -734,12 +744,28 @@ async function runExport(kind){
   forceSize={w,h}; smoothPrimed=false;
   await nextFrame(); await nextFrame(); await nextFrame(); await nextFrame();
   try{
+    if(kind==="png")  await exportStill(w,h);
     if(kind==="apng") await exportAPNG(w,h);
     if(kind==="gif")  await exportGIF(w,h);
     if(kind==="mp4")  await exportVideo(w,h,"mp4");
     if(kind==="webm") await exportVideo(w,h,"webm");
   }catch(err){ console.error(err); setStatus("Export failed: "+err.message); await wait(2500); }
   forceSize=null; setStatus("");
+}
+
+/* -------- still image (PNG / JPEG), single frame of the composite -------- */
+async function exportStill(w,h){
+  await nextFrame(); // ensure a rendered frame at the export size
+  const comp=document.createElement("canvas"); comp.width=w; comp.height=h;
+  const ctx=comp.getContext("2d");
+  if(!P.exportTransparent){                            // include the background layer
+    drawExportBackground(ctx,w,h);
+    ctx.globalCompositeOperation = (P.bgType==="none") ? "source-over" : cssBlendToCanvas(P.blend);
+  }                                                    // else: leave transparent -> dots only
+  ctx.drawImage(canvas,0,0,w,h);
+  const blob = await new Promise(res=> comp.toBlob(res, "image/png"));
+  download(blob, "dot-grid.png");
+  setStatus("PNG saved ✓"); await wait(1400);
 }
 
 /* -------- transparent animated GIF -------- */
@@ -1142,8 +1168,8 @@ async function exportAPNG(w,h){
   }
   await nextFrame();
   const bytes=await encodeAPNG(frames,w,h,fps);
-  download(new Blob([bytes],{type:"image/png"}), "dot-grid.png");
-  setStatus("Transparent PNG saved ✓"); await wait(1400);
+  download(new Blob([bytes],{type:"image/png"}), "dot-grid-animated.png");
+  setStatus("Animated PNG saved ✓"); await wait(1400);
 }
 
 /* ------------------------------------------------- Embedded snippet body */
