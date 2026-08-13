@@ -590,7 +590,7 @@ const SECTIONS = [
     {t:"sub", l:"Embed code"},
     {t:"buttons", buttons:[{l:"⬇ Self-contained HTML",fn:()=>runExport("selfhtml"),primary:true},{l:"Copy",fn:()=>runExport("selfcopy")}]},
     {t:"buttons", buttons:[{l:"⬇ HTML (hosted source)",fn:()=>runExport("code")}]},
-    {t:"note", html:"<b>Self-contained</b> bakes your image source into the file (data URI) — no hosting, works in Webflow &amp; Claude artifacts. Renders then stops for performance. Video can't be baked — use <b>HTML (hosted source)</b> with a URL, or export MP4."},
+    {t:"note", html:"<b>Self-contained</b> bakes the source into the file (data URI) — no hosting, works in Webflow &amp; Claude artifacts. A video is baked as its <b>current still frame</b> (pause to pick it); for motion use MP4 or <b>HTML (hosted source)</b>."},
   ]],
 ];
 
@@ -905,13 +905,28 @@ function buildEmbedHTML(){
     .replace("@@BLEND@@", JSON.stringify(P.blend))
     .replace("@@BGCSS@@", JSON.stringify(bakeBgCSS()));
 }
-function buildSelfHTML(){
+function buildSelfHTML(srcData){
   return EMBED_IMG_TEMPLATE
     .replace("@@PARAMS@@", JSON.stringify(bakeParams()))
     .replace("@@SH@@", JSON.stringify(SHADERS))
     .replace("@@BLEND@@", JSON.stringify(P.blend))
     .replace("@@BGCSS@@", JSON.stringify(bakeBgCSS()))
-    .replace("@@SRC@@", JSON.stringify(srcImageDataURL||""));
+    .replace("@@SRC@@", JSON.stringify(srcData||""));
+}
+// a data URI for the current source: original image, or a snapshot of the current video/placeholder frame
+function sourceSnapshotDataURL(){
+  if(srcKind==="image" && srcImageDataURL) return srcImageDataURL; // keep the original (crisp SVGs, small JPEGs)
+  let el=null, w=512, h=512;
+  if(srcKind==="video" && haveVideo && video.readyState>=2){ el=video; w=video.videoWidth||512; h=video.videoHeight||512; }
+  else if(srcKind==="image" && imgReady){ el=imgCanvas; w=imgCanvas.width||512; h=imgCanvas.height||512; }
+  else { el=ph; w=512; h=512; }
+  if(!el) return null;
+  const cap=1280, s=Math.min(1, cap/Math.max(w,h));
+  const c=document.createElement("canvas"); c.width=Math.max(1,Math.round(w*s)); c.height=Math.max(1,Math.round(h*s));
+  try{ c.getContext("2d").drawImage(el,0,0,c.width,c.height);
+    const fmt = (srcKind==="video") ? "image/jpeg" : "image/png"; // JPEG keeps video frames small
+    return c.toDataURL(fmt, fmt==="image/jpeg"?0.9:undefined); }
+  catch(e){ return null; }
 }
 async function exportCode(copyOnly){
   const html=buildEmbedHTML();
@@ -924,15 +939,18 @@ async function exportCode(copyOnly){
   setStatus("HTML saved ✓"); await wait(1400); setStatus("");
 }
 async function exportSelfHTML(copyOnly){
-  if(srcKind!=="image" || !srcImageDataURL){ setStatus("Load an image source first to bake it in"); await wait(2400); setStatus(""); return; }
-  const html=buildSelfHTML();
+  if(!srcKind){ setStatus("Load a video or image source first"); await wait(2400); setStatus(""); return; }
+  const srcData = sourceSnapshotDataURL();
+  if(!srcData){ setStatus("Couldn't read the source frame"); await wait(2400); setStatus(""); return; }
+  const html=buildSelfHTML(srcData);
+  const note = srcKind==="video" ? " (video baked as current frame)" : "";
   if(copyOnly){
-    try{ await navigator.clipboard.writeText(html); setStatus("Self-contained code copied ✓"); }
+    try{ await navigator.clipboard.writeText(html); setStatus("Self-contained code copied ✓"+note); }
     catch(e){ setStatus("Clipboard blocked — downloading instead"); download(new Blob([html],{type:"text/html"}),"dot-grid-standalone.html"); }
-    await wait(1600); setStatus(""); return;
+    await wait(1800); setStatus(""); return;
   }
   download(new Blob([html],{type:"text/html"}), "dot-grid-standalone.html");
-  setStatus("Self-contained HTML saved ✓"); await wait(1400); setStatus("");
+  setStatus("Self-contained HTML saved ✓"+note); await wait(1800); setStatus("");
 }
 
 function download(blob, name){
