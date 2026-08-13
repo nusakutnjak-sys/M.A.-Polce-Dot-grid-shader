@@ -30,7 +30,8 @@
     width:100%; aspect-ratio:16/9; box-shadow:0 0 0 1px rgba(255,255,255,.07); }
   #bg{position:absolute; inset:0; z-index:0; overflow:hidden}
   #bgMedia{position:absolute; inset:0; width:100%; height:100%; }
-  #glcanvas{position:absolute; inset:0; z-index:1; width:100%; height:100%; display:block}
+  #glcanvas{position:absolute; inset:0; z-index:1; width:100%; height:100%; display:block; cursor:grab}
+  #preview.grabbing, #preview.grabbing #glcanvas{cursor:grabbing}
   #status{
     position:absolute; left:50%; bottom:18px; transform:translateX(-50%); z-index:3;
     background:rgba(10,12,16,.86); border:1px solid var(--line); color:#e7ebf2;
@@ -342,13 +343,16 @@ function uploadSource(){
     gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE, ph);
   }
 }
-function sourceTransform(){
-  const arCanvas=RW/RH, arVid=srcW/srcH, r=arCanvas/arVid; let sx,sy;
+function sourceBase(){
+  const arCanvas=RW/RH, arVid=srcW/srcH, r=arCanvas/arVid; let bsx,bsy;
   // scale>1 crops (samples a smaller region); scale<1 letterboxes (source shrinks inside frame)
-  if(P.srcFit==="cover"){ if(r>1){ sx=1; sy=r; } else { sx=1/r; sy=1; } }
-  else {                  if(r>1){ sx=1/r; sy=1; } else { sx=1; sy=r; } }  // contain: whole source fits, true aspect
-  sx*=P.srcScale; sy*=P.srcScale;
-  return {sx,sy,ox:P.srcX,oy:P.srcY};
+  if(P.srcFit==="cover"){ if(r>1){ bsx=1; bsy=r; } else { bsx=1/r; bsy=1; } }
+  else {                  if(r>1){ bsx=1/r; bsy=1; } else { bsx=1; bsy=r; } } // contain: whole source, true aspect
+  return {bsx,bsy};
+}
+function sourceTransform(){
+  const b=sourceBase();
+  return {sx:b.bsx*P.srcScale, sy:b.bsy*P.srcScale, ox:P.srcX, oy:P.srcY};
 }
 
 /* ---------------------------------------------------------------- Resize  */
@@ -505,8 +509,8 @@ const SECTIONS = [
     {t:"check", k:"srcLoop", l:"Loop", onchange:v=>video.loop=v},
     {t:"range", k:"srcSpeed", l:"Speed", min:0.1,max:3,step:0.05, onchange:v=>video.playbackRate=v},
     {t:"range", k:"srcScale", l:"Scale", min:0.2,max:3,step:0.01},
-    {t:"range", k:"srcX", l:"Position X", min:-1,max:1,step:0.01},
-    {t:"range", k:"srcY", l:"Position Y", min:-1,max:1,step:0.01},
+    {t:"range", k:"srcX", l:"Position X", min:-2,max:2,step:0.01},
+    {t:"range", k:"srcY", l:"Position Y", min:-2,max:2,step:0.01},
     {t:"select", k:"srcFit", l:"Fit", opts:[["cover","Cover"],["contain","Contain"]]},
   ]],
   ["Dot Grid", [
@@ -953,7 +957,7 @@ function migrate(o){
   return o;
 }
 /* apply a full parameter object + resync every widget */
-function applyParams(obj){ obj=migrate(Object.assign({}, obj||{})); P = clone(Object.assign({}, DEFAULTS, obj)); activePreset=""; syncUI(); }
+function applyParams(obj){ obj=migrate(Object.assign({}, obj||{})); P = clone(Object.assign({}, DEFAULTS, obj)); activePreset=""; syncUI(); if(!applyingHistory) commitHistory(); }
 function syncUI(){
   document.querySelectorAll(".row").forEach(row=>{ const c=row._spec; if(c && c.k && row._set) row._set(P[c.k]); });
   if(gradientEditorRef) gradientEditorRef._rebuild();
@@ -1229,15 +1233,79 @@ document.getElementById("btnFull").onclick = ()=>{
   if(!document.fullscreenElement) el.requestFullscreen?.(); else document.exitFullscreen?.();
 };
 
+/* ------------------------------------------------------- Undo / Redo history */
+/* Declared before any applyParams() call. History tracks settings (P) only. */
+let hist=[], histIdx=-1, applyingHistory=false, histTimer=null;
+function commitHistory(){
+  const s=JSON.stringify(P);
+  if(histIdx>=0 && hist[histIdx]===s) return;   // nothing changed
+  hist=hist.slice(0,histIdx+1);                 // drop any redo branch
+  hist.push(s); histIdx=hist.length-1;
+  if(hist.length>150){ hist.shift(); histIdx--; }
+}
+function scheduleHistory(){ clearTimeout(histTimer); histTimer=setTimeout(commitHistory, 350); }
+function applyHistoryState(s){ applyingHistory=true; P=JSON.parse(s); syncUI(); applyingHistory=false; }
+function undo(){ clearTimeout(histTimer); commitHistory(); if(histIdx>0){ histIdx--; applyHistoryState(hist[histIdx]); flash("Undo ↶"); } else flash("Nothing to undo"); }
+function redo(){ if(histIdx<hist.length-1){ histIdx++; applyHistoryState(hist[histIdx]); flash("Redo ↷"); } else flash("Nothing to redo"); }
+
+/* keep the Source sliders in sync when panning/zooming with the mouse */
+function syncSourceWidgets(){
+  document.querySelectorAll(".row").forEach(row=>{ const c=row._spec; if(c && (c.k==="srcX"||c.k==="srcY"||c.k==="srcScale") && row._set) row._set(P[c.k]); });
+  if(activePreset!==""){ activePreset=""; updateActiveHighlight(); }
+  scheduleSession();
+}
+
 /* --------------------------------------------------------------- Startup */
 buildUI();
 const _sess = loadSession(); if(_sess) applyParams(_sess);
 updateBackground(); updateComposite(); resize();
+
 const _panel = document.getElementById("panel");
-function onPanelEdit(){ scheduleSession(); if(activePreset!==""){ activePreset=""; updateActiveHighlight(); } }
+function onPanelEdit(){ scheduleSession(); scheduleHistory(); if(activePreset!==""){ activePreset=""; updateActiveHighlight(); } }
 _panel.addEventListener("input", onPanelEdit);
 _panel.addEventListener("change", onPanelEdit);
 window.addEventListener("beforeunload", persistSession);
+
+/* Ctrl+Z / Cmd+Z = undo, Ctrl+Shift+Z / Ctrl+Y = redo (ignored while typing in a text field) */
+window.addEventListener("keydown", e=>{
+  const mod=e.metaKey||e.ctrlKey; if(!mod) return;
+  const t=e.target, tag=t&&t.tagName;
+  if(tag==="TEXTAREA" || (tag==="INPUT" && /^(text|search|number|email|url|password|tel)$/.test((t.type||"text")))) return;
+  const k=(e.key||"").toLowerCase();
+  if(k==="z" && !e.shiftKey){ e.preventDefault(); undo(); }
+  else if((k==="z" && e.shiftKey) || k==="y"){ e.preventDefault(); redo(); }
+});
+
+/* 2D navigation of the source: drag = pan, wheel = zoom (to cursor), double-click = reset */
+(function sourceNav(){
+  const prev=document.getElementById("preview");
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  let dragging=false, lx=0, ly=0;
+  prev.addEventListener("mousedown", e=>{ if(e.button!==0) return; dragging=true; lx=e.clientX; ly=e.clientY; prev.classList.add("grabbing"); e.preventDefault(); });
+  window.addEventListener("mousemove", e=>{
+    if(!dragging) return;
+    const r=prev.getBoundingClientRect(); const b=sourceBase();
+    const dvx=(e.clientX-lx)/r.width, dvy=-(e.clientY-ly)/r.height; lx=e.clientX; ly=e.clientY;
+    P.srcX=clamp(P.srcX - dvx/(b.bsx*P.srcScale), -2, 2);
+    P.srcY=clamp(P.srcY - dvy/(b.bsy*P.srcScale), -2, 2);
+    syncSourceWidgets();
+  });
+  window.addEventListener("mouseup", ()=>{ if(dragging){ dragging=false; prev.classList.remove("grabbing"); scheduleHistory(); } });
+  prev.addEventListener("wheel", e=>{
+    e.preventDefault();
+    const r=prev.getBoundingClientRect(); const b=sourceBase();
+    const vx=(e.clientX-r.left)/r.width, vy=1-(e.clientY-r.top)/r.height;
+    const sOld=P.srcScale, sNew=clamp(sOld*Math.exp(-e.deltaY*0.0015), 0.2, 3);
+    if(sNew!==sOld){
+      P.srcX=clamp(P.srcX + (vx-0.5)/b.bsx*(1/sOld-1/sNew), -2, 2);
+      P.srcY=clamp(P.srcY + (vy-0.5)/b.bsy*(1/sOld-1/sNew), -2, 2);
+      P.srcScale=sNew; syncSourceWidgets(); scheduleHistory();
+    }
+  }, {passive:false});
+  prev.addEventListener("dblclick", e=>{ e.preventDefault(); P.srcX=0; P.srcY=0; P.srcScale=1; syncSourceWidgets(); scheduleHistory(); });
+})();
+
+commitHistory(); // seed the initial state (after any session restore)
 requestAnimationFrame(render);
 </script>
 </body>
