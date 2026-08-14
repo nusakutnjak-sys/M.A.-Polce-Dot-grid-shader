@@ -32,6 +32,16 @@
   #bgMedia{position:absolute; inset:0; width:100%; height:100%; }
   #glcanvas{position:absolute; inset:0; z-index:1; width:100%; height:100%; display:block; cursor:grab}
   #preview.grabbing, #preview.grabbing #glcanvas{cursor:grabbing}
+  #cropOverlay{position:absolute; inset:0; z-index:2; pointer-events:none; display:none}
+  #cropOverlay.on{display:block}
+  #cropRect{position:absolute; box-sizing:border-box; box-shadow:0 0 0 9999px rgba(0,0,0,.55);
+    border:1px solid rgba(255,255,255,.92); cursor:move; pointer-events:auto}
+  #cropRect .h{position:absolute; width:12px; height:12px; background:#fff; border:1px solid var(--accent);
+    border-radius:2px; pointer-events:auto}
+  #cropRect .h.tl{left:-6px;top:-6px;cursor:nwse-resize}
+  #cropRect .h.tr{right:-6px;top:-6px;cursor:nesw-resize}
+  #cropRect .h.bl{left:-6px;bottom:-6px;cursor:nesw-resize}
+  #cropRect .h.br{right:-6px;bottom:-6px;cursor:nwse-resize}
   #status{
     position:absolute; left:50%; bottom:18px; transform:translateX(-50%); z-index:3;
     background:rgba(10,12,16,.86); border:1px solid var(--line); color:#e7ebf2;
@@ -121,6 +131,7 @@
     <div id="preview">
       <div id="bg"><div id="bgMedia"></div></div>
       <canvas id="glcanvas"></canvas>
+      <div id="cropOverlay"><div id="cropRect"><span class="h tl"></span><span class="h tr"></span><span class="h bl"></span><span class="h br"></span></div></div>
       <div id="status"></div>
     </div>
   </div>
@@ -168,6 +179,8 @@ const DEFAULTS = {
   shaderOpacity:1.0, blend:"normal",
   // EXPORT
   exportW:1280, exportDur:3, exportFps:15, exportTransparent:true,
+  // EXPORT FRAME (crop) — normalized to the preview (0..1)
+  cropOn:false, cropX:0.2, cropY:0.15, cropW:0.6, cropH:0.6, cropAspect:"free",
 };
 const clone = o => JSON.parse(JSON.stringify(o));
 let P = clone(DEFAULTS);
@@ -572,6 +585,15 @@ const SECTIONS = [
       ["normal","Normal"],["screen","Screen"],["lighten","Lighten"],
       ["multiply","Multiply"],["overlay","Overlay"],["soft-light","Soft Light"]], onchange:updateComposite},
   ]],
+  ["Export Frame", [
+    {t:"check", k:"cropOn", l:"Crop to frame", onchange:()=>{ updateCropOverlay(); applyVisibility(); }},
+    {t:"select", k:"cropAspect", l:"Aspect", opts:[["free","Free"],["1:1","1:1 Square"],["4:5","4:5 Portrait"],["3:2","3:2"],["16:9","16:9"],["9:16","9:16 Story"]], onchange:()=>{ enforceAspect("w"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }, show:()=>P.cropOn},
+    {t:"range", k:"cropX", l:"Position X", min:0,max:1,step:0.005, unit:"", pct:true, onchange:()=>{ clampCrop(); updateCropOverlay(); }, show:()=>P.cropOn},
+    {t:"range", k:"cropY", l:"Position Y", min:0,max:1,step:0.005, pct:true, onchange:()=>{ clampCrop(); updateCropOverlay(); }, show:()=>P.cropOn},
+    {t:"range", k:"cropW", l:"Width", min:0.05,max:1,step:0.005, pct:true, onchange:()=>{ enforceAspect("w"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }, show:()=>P.cropOn},
+    {t:"range", k:"cropH", l:"Height", min:0.05,max:1,step:0.005, pct:true, onchange:()=>{ enforceAspect("h"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }, show:()=>P.cropOn},
+    {t:"note", html:"Drag the frame to move it, corners to resize. Only this area is exported; the rest is dimmed.", show:()=>P.cropOn},
+  ]],
   ["Export", [
     {t:"select", k:"exportW", l:"Resolution", opts:[["640","640 px"],["960","960 px"],["1280","1280 px"],["1920","1920 px (HD)"],["2560","2560 px"],["3840","3840 px (4K)"]], parse:parseInt},
 
@@ -615,7 +637,7 @@ function makeControl(c){
     const inp=document.createElement("input"); inp.type="range";
     inp.min=c.min; inp.max=c.max; inp.step=c.step; inp.value=P[c.k];
     const val=document.createElement("span"); val.className="val";
-    const fmt=v=>(c.step<1?(+v).toFixed(2):Math.round(v))+(c.unit||"");
+    const fmt=v=> c.pct ? Math.round(v*100)+"%" : ((c.step<1?(+v).toFixed(2):Math.round(v))+(c.unit||""));
     val.textContent=fmt(P[c.k]);
     inp.oninput=()=>{ P[c.k]=parseFloat(inp.value); val.textContent=fmt(inp.value); c.onchange&&c.onchange(P[c.k]); };
     row.append(lab,inp,val); row._set=v=>{inp.value=v; val.textContent=fmt(v);};
@@ -755,11 +777,27 @@ function exportSize(){
 }
 const tmp2d = document.createElement("canvas");
 const tctx = tmp2d.getContext("2d");
-function grabRGBA(w,h){
-  tmp2d.width=w; tmp2d.height=h;
-  tctx.clearRect(0,0,w,h);
-  tctx.drawImage(canvas,0,0,w,h);
-  return tctx.getImageData(0,0,w,h).data;
+// crop sub-rectangle (in full-render pixels) + output size; identity when the frame is off
+function cropRectPx(w,h,even){
+  if(!P.cropOn) return {sx:0,sy:0,sw:w,sh:h,ow:w,oh:h};
+  let sw=Math.max(2,Math.round(P.cropW*w)), sh=Math.max(2,Math.round(P.cropH*h));
+  let sx=Math.round(P.cropX*w), sy=Math.round(P.cropY*h);
+  sx=Math.max(0,Math.min(sx,w-sw)); sy=Math.max(0,Math.min(sy,h-sh));
+  let ow=sw, oh=sh; if(even){ ow-=ow%2; oh-=oh%2; }
+  return {sx,sy,sw,sh,ow:Math.max(2,ow),oh:Math.max(2,oh)};
+}
+// full composite (background + dots) at the render size; transparent skips the background
+function fullCompositeCanvas(w,h,transparent){
+  const c=document.createElement("canvas"); c.width=w; c.height=h; const ctx=c.getContext("2d");
+  if(!transparent){ drawExportBackground(ctx,w,h); ctx.globalCompositeOperation=(P.bgType==="none")?"source-over":cssBlendToCanvas(P.blend); }
+  ctx.drawImage(canvas,0,0,w,h);
+  return c;
+}
+function grabRGBA(w,h){ // dots-only frame, cropped to the export frame -> {data,w,h}
+  const cr=cropRectPx(w,h);
+  tmp2d.width=cr.ow; tmp2d.height=cr.oh; tctx.clearRect(0,0,cr.ow,cr.oh);
+  tctx.drawImage(canvas, cr.sx,cr.sy,cr.sw,cr.sh, 0,0,cr.ow,cr.oh);
+  return { data: tctx.getImageData(0,0,cr.ow,cr.oh).data, w:cr.ow, h:cr.oh };
 }
 
 async function runExport(kind){
@@ -782,13 +820,10 @@ async function runExport(kind){
 /* -------- still image (PNG / JPEG), single frame of the composite -------- */
 async function exportStill(w,h){
   await nextFrame(); // ensure a rendered frame at the export size
-  const comp=document.createElement("canvas"); comp.width=w; comp.height=h;
-  const ctx=comp.getContext("2d");
-  if(!P.exportTransparent){                            // include the background layer
-    drawExportBackground(ctx,w,h);
-    ctx.globalCompositeOperation = (P.bgType==="none") ? "source-over" : cssBlendToCanvas(P.blend);
-  }                                                    // else: leave transparent -> dots only
-  ctx.drawImage(canvas,0,0,w,h);
+  const full=fullCompositeCanvas(w,h, P.exportTransparent);
+  const cr=cropRectPx(w,h);
+  const comp=document.createElement("canvas"); comp.width=cr.ow; comp.height=cr.oh;
+  comp.getContext("2d").drawImage(full, cr.sx,cr.sy,cr.sw,cr.sh, 0,0,cr.ow,cr.oh);
   const blob = await new Promise(res=> comp.toBlob(res, "image/png"));
   download(blob, "dot-grid.png");
   setStatus("PNG saved ✓"); await wait(1400);
@@ -805,7 +840,8 @@ async function exportGIF(w,h){
     await wait(1000/fps);
   }
   setStatus("Encoding GIF…"); await nextFrame();
-  const bytes = encodeGIF(frames, w, h, Math.max(2,Math.round(100/fps)));
+  const cw=frames[0].w, ch=frames[0].h;
+  const bytes = encodeGIF(frames.map(f=>f.data), cw, ch, Math.max(2,Math.round(100/fps)));
   download(new Blob([bytes],{type:"image/gif"}), "dot-grid.gif");
   setStatus("GIF saved ✓"); await wait(1400);
 }
@@ -824,7 +860,8 @@ async function exportVideo(w,h,format){
   if(format==="mp4" && !mime){
     setStatus("MP4 recording isn't supported in this browser — use WebM"); await wait(2800); return;
   }
-  const comp=document.createElement("canvas"); comp.width=w; comp.height=h;
+  const cr=cropRectPx(w,h,true); // even output dims for the codec
+  const comp=document.createElement("canvas"); comp.width=cr.ow; comp.height=cr.oh;
   const ctx=comp.getContext("2d");
   const stream=comp.captureStream(P.exportFps);
   const rec=new MediaRecorder(stream, mime?{mimeType:mime,videoBitsPerSecond:12000000}:undefined);
@@ -834,10 +871,9 @@ async function exportVideo(w,h,format){
   const end=performance.now()+P.exportDur*1000;
   await new Promise(res=>{
     function step(){
-      drawExportBackground(ctx,w,h);
-      ctx.save(); ctx.globalAlpha=1;
-      ctx.globalCompositeOperation = (P.bgType==="none") ? "source-over" : cssBlendToCanvas(P.blend);
-      ctx.drawImage(canvas,0,0,w,h); ctx.restore();
+      const full=fullCompositeCanvas(w,h,false);
+      ctx.clearRect(0,0,cr.ow,cr.oh);
+      ctx.drawImage(full, cr.sx,cr.sy,cr.sw,cr.sh, 0,0,cr.ow,cr.oh);
       const left=Math.max(0,end-performance.now());
       setStatus("Recording "+format.toUpperCase()+"… "+(left/1000).toFixed(1)+"s");
       if(performance.now()<end) requestAnimationFrame(step); else res();
@@ -1045,7 +1081,7 @@ function syncUI(){
   if(gradientEditorRef) gradientEditorRef._rebuild();
   if(video){ video.playbackRate=P.srcSpeed; video.loop=P.srcLoop; }
   updateBackground(); updateComposite(); applyVisibility();
-  updateActiveHighlight(); scheduleSession();
+  updateCropOverlay(); updateActiveHighlight(); scheduleSession();
 }
 
 function buildPresetsUI(){
@@ -1253,7 +1289,8 @@ async function exportAPNG(w,h){
     await nextFrame(); frames.push(grabRGBA(w,h)); await wait(1000/fps);
   }
   await nextFrame();
-  const bytes=await encodeAPNG(frames,w,h,fps);
+  const cw=frames[0].w, ch=frames[0].h;
+  const bytes=await encodeAPNG(frames.map(f=>f.data),cw,ch,fps);
   download(new Blob([bytes],{type:"image/png"}), "dot-grid-animated.png");
   setStatus("Animated PNG saved ✓"); await wait(1400);
 }
@@ -1384,6 +1421,37 @@ function syncSourceWidgets(){
   scheduleSession();
 }
 
+/* ---------------------------------------------------------- Export frame (crop) */
+const CROP_ASPECTS={ "free":0, "1:1":1, "4:5":4/5, "3:2":3/2, "16:9":16/9, "9:16":9/16 };
+function previewAspect(){ return (cssW||16)/(cssH||9); }
+function cropRatio(){ return CROP_ASPECTS[P.cropAspect]||0; }
+function clampCrop(){
+  P.cropW=Math.min(1, Math.max(0.05, P.cropW));
+  P.cropH=Math.min(1, Math.max(0.05, P.cropH));
+  P.cropX=Math.min(1-P.cropW, Math.max(0, P.cropX));
+  P.cropY=Math.min(1-P.cropH, Math.max(0, P.cropY));
+}
+function enforceAspect(master){
+  const R=cropRatio(); if(!R) return;
+  const pa=previewAspect();
+  // pixel aspect = (cropW/cropH)*previewAspect = R  ->  cropH = cropW*pa/R
+  if(master==="h"){ P.cropW = P.cropH * R / pa; if(P.cropW>1){ P.cropW=1; P.cropH=P.cropW*pa/R; } }
+  else           { P.cropH = P.cropW * pa / R; if(P.cropH>1){ P.cropH=1; P.cropW=P.cropH*R/pa; } }
+}
+function updateCropOverlay(){
+  const ov=document.getElementById("cropOverlay"), rc=document.getElementById("cropRect");
+  if(!ov) return;
+  ov.classList.toggle("on", !!P.cropOn);
+  if(!P.cropOn) return;
+  rc.style.left=(P.cropX*100)+"%"; rc.style.top=(P.cropY*100)+"%";
+  rc.style.width=(P.cropW*100)+"%"; rc.style.height=(P.cropH*100)+"%";
+}
+function syncCropWidgets(){
+  document.querySelectorAll(".row").forEach(row=>{ const c=row._spec; if(c && (c.k==="cropX"||c.k==="cropY"||c.k==="cropW"||c.k==="cropH"||c.k==="cropAspect") && row._set) row._set(P[c.k]); });
+  if(activePreset!==""){ activePreset=""; updateActiveHighlight(); }
+  scheduleSession();
+}
+
 /* --------------------------------------------------------------- Startup */
 buildUI();
 const _sess = loadSession(); if(_sess) applyParams(_sess);
@@ -1434,6 +1502,33 @@ window.addEventListener("keydown", e=>{
   prev.addEventListener("dblclick", e=>{ e.preventDefault(); P.srcX=0; P.srcY=0; P.srcScale=1; syncSourceWidgets(); scheduleHistory(); });
 })();
 
+/* Move / resize the export frame (drag body = move, corners = resize, aspect-locked if set) */
+(function cropNav(){
+  const prev=document.getElementById("preview"), rc=document.getElementById("cropRect");
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  let mode=null, sx0=0, sy0=0, start=null;
+  const norm=e=>{ const r=prev.getBoundingClientRect(); return {x:(e.clientX-r.left)/r.width, y:(e.clientY-r.top)/r.height}; };
+  function begin(m,e){ if(!P.cropOn) return; mode=m; const p=norm(e); sx0=p.x; sy0=p.y; start={x:P.cropX,y:P.cropY,w:P.cropW,h:P.cropH}; e.stopPropagation(); e.preventDefault(); document.body.style.userSelect="none"; }
+  rc.addEventListener("mousedown", e=>{ if(e.target===rc) begin("move",e); });
+  ["tl","tr","bl","br"].forEach(h=>{ rc.querySelector(".h."+h).addEventListener("mousedown", e=>begin("rz-"+h,e)); });
+  window.addEventListener("mousemove", e=>{
+    if(!mode) return;
+    const p=norm(e), dx=p.x-sx0, dy=p.y-sy0, R=cropRatio(), pa=previewAspect();
+    if(mode==="move"){
+      P.cropX=clamp(start.x+dx, 0, 1-start.w); P.cropY=clamp(start.y+dy, 0, 1-start.h);
+    } else {
+      const right=start.x+start.w, bottom=start.y+start.h;
+      if(mode==="rz-br"){ let w=clamp(p.x-start.x,0.05,1-start.x), h=R?w*pa/R:clamp(p.y-start.y,0.05,1-start.y); h=Math.min(h,1-start.y); P.cropX=start.x;P.cropY=start.y;P.cropW=w;P.cropH=h; }
+      else if(mode==="rz-tl"){ let w=clamp(right-p.x,0.05,right), h=R?w*pa/R:clamp(bottom-p.y,0.05,bottom); h=Math.min(h,bottom); P.cropW=w;P.cropH=h;P.cropX=right-w;P.cropY=bottom-h; }
+      else if(mode==="rz-tr"){ let w=clamp(p.x-start.x,0.05,1-start.x), h=R?w*pa/R:clamp(bottom-p.y,0.05,bottom); h=Math.min(h,bottom); P.cropW=w;P.cropH=h;P.cropX=start.x;P.cropY=bottom-h; }
+      else if(mode==="rz-bl"){ let w=clamp(right-p.x,0.05,right), h=R?w*pa/R:clamp(p.y-start.y,0.05,1-start.y); h=Math.min(h,1-start.y); P.cropW=w;P.cropH=h;P.cropX=right-w;P.cropY=start.y; }
+    }
+    clampCrop(); updateCropOverlay(); syncCropWidgets();
+  });
+  window.addEventListener("mouseup", ()=>{ if(mode){ mode=null; document.body.style.userSelect=""; scheduleHistory(); } });
+})();
+
+updateCropOverlay();
 commitHistory(); // seed the initial state (after any session restore)
 requestAnimationFrame(render);
 </script>
