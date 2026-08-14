@@ -83,6 +83,9 @@
   input[type=color]{flex:0 0 32px;height:24px;padding:0;border:1px solid var(--line);border-radius:5px;background:var(--panel2);cursor:pointer}
   input[type=text].hex{flex:0 0 74px;min-width:0;width:74px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:5px 6px;font-size:11px;font-family:ui-monospace,Menlo,monospace;text-transform:uppercase}
   input[type=text].presetName{flex:1 1 0;min-width:0;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:6px 8px;font-size:11px}
+  input[type=number].numin{flex:0 0 66px;min-width:0;width:66px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:5px 6px;font-size:11px;text-align:right;font-variant-numeric:tabular-nums}
+  input[type=number].numin::-webkit-inner-spin-button,input[type=number].numin::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+  .numunit{flex:0 0 auto;color:var(--muted);font-size:10px;margin-left:3px;width:16px}
   .presetGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0}
   .presetChip{position:relative;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;
     background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px;cursor:pointer;
@@ -588,14 +591,14 @@ const SECTIONS = [
   ["Export Frame", [
     {t:"check", k:"cropOn", l:"Crop to frame", onchange:()=>{ updateCropOverlay(); applyVisibility(); }},
     {t:"select", k:"cropAspect", l:"Aspect", opts:[["free","Free"],["1:1","1:1 Square"],["4:5","4:5 Portrait"],["3:2","3:2"],["16:9","16:9"],["9:16","9:16 Story"]], onchange:()=>{ enforceAspect("w"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }, show:()=>P.cropOn},
-    {t:"range", k:"cropX", l:"Position X", min:0,max:1,step:0.005, unit:"", pct:true, onchange:()=>{ clampCrop(); updateCropOverlay(); }, show:()=>P.cropOn},
+    {t:"num", k:"cropW", l:"Width", unit:"px", min:2, get:cropPxW, set:setCropPxW, show:()=>P.cropOn},
+    {t:"num", k:"cropH", l:"Height", unit:"px", min:2, get:cropPxH, set:setCropPxH, show:()=>P.cropOn},
+    {t:"range", k:"cropX", l:"Position X", min:0,max:1,step:0.005, pct:true, onchange:()=>{ clampCrop(); updateCropOverlay(); }, show:()=>P.cropOn},
     {t:"range", k:"cropY", l:"Position Y", min:0,max:1,step:0.005, pct:true, onchange:()=>{ clampCrop(); updateCropOverlay(); }, show:()=>P.cropOn},
-    {t:"range", k:"cropW", l:"Width", min:0.05,max:1,step:0.005, pct:true, onchange:()=>{ enforceAspect("w"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }, show:()=>P.cropOn},
-    {t:"range", k:"cropH", l:"Height", min:0.05,max:1,step:0.005, pct:true, onchange:()=>{ enforceAspect("h"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }, show:()=>P.cropOn},
-    {t:"note", html:"Drag the frame to move it, corners to resize. Only this area is exported; the rest is dimmed.", show:()=>P.cropOn},
+    {t:"note", html:"Width/Height are the export pixels at the current <b>Resolution</b>. Drag the frame to move it, corners to resize.", show:()=>P.cropOn},
   ]],
   ["Export", [
-    {t:"select", k:"exportW", l:"Resolution", opts:[["640","640 px"],["960","960 px"],["1280","1280 px"],["1920","1920 px (HD)"],["2560","2560 px"],["3840","3840 px (4K)"]], parse:parseInt},
+    {t:"select", k:"exportW", l:"Resolution", opts:[["640","640 px"],["960","960 px"],["1280","1280 px"],["1920","1920 px (HD)"],["2560","2560 px"],["3840","3840 px (4K)"]], parse:parseInt, onchange:()=>{ if(P.cropOn) syncCropWidgets(); }},
 
     {t:"sub", l:"Still image"},
     {t:"check", k:"exportTransparent", l:"Transparent background"},
@@ -677,6 +680,17 @@ function makeControl(c){
     const bar=document.createElement("div"); bar.className="btnrow"; bar.style.flex="1";
     c.buttons.forEach(b=>{ const bt=document.createElement("button"); bt.className="act"+(b.primary?" primary":""); bt.textContent=b.l; bt.onclick=b.fn; bar.appendChild(bt); });
     row.appendChild(bar);
+  }
+  else if(c.t==="num"){
+    const lab=document.createElement("label"); lab.textContent=c.l;
+    const spacer=document.createElement("span"); spacer.style.flex="1";
+    const inp=document.createElement("input"); inp.type="number"; inp.className="numin";
+    if(c.min!=null) inp.min=c.min; if(c.max!=null) inp.max=c.max; inp.step=c.step||1;
+    const unit=document.createElement("span"); unit.className="numunit"; unit.textContent=c.unit||"";
+    const read=()=> c.get ? c.get() : P[c.k];
+    inp.value=Math.round(read());
+    inp.onchange=()=>{ let v=parseFloat(inp.value); if(isNaN(v)) v=read(); if(c.set) c.set(v); else { P[c.k]=v; c.onchange&&c.onchange(v); } inp.value=Math.round(read()); };
+    row.append(lab,spacer,inp,unit); row._set=()=>{ inp.value=Math.round(read()); };
   }
   else if(c.t==="note"){ row.innerHTML='<div class="hint" style="flex:1">'+c.html+'</div>'; }
   else if(c.t==="sub"){ row.className="subhead"; row.textContent=c.l; }
@@ -1451,6 +1465,12 @@ function syncCropWidgets(){
   if(activePreset!==""){ activePreset=""; updateActiveHighlight(); }
   scheduleSession();
 }
+// crop size in export pixels (at the current Resolution)
+function exportFullDims(){ const w=Math.round(P.exportW); return {w, h:Math.round(w*(cssH/Math.max(1,cssW)))}; }
+function cropPxW(){ return Math.round(P.cropW*exportFullDims().w); }
+function cropPxH(){ return Math.round(P.cropH*exportFullDims().h); }
+function setCropPxW(px){ const d=exportFullDims(); P.cropW=Math.min(1,Math.max(0.02, px/d.w)); enforceAspect("w"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }
+function setCropPxH(px){ const d=exportFullDims(); P.cropH=Math.min(1,Math.max(0.02, px/d.h)); enforceAspect("h"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }
 
 /* --------------------------------------------------------------- Startup */
 buildUI();
