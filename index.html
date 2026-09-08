@@ -184,8 +184,10 @@ const DEFAULTS = {
   bgScale:1, bgX:0, bgY:0, bgOpacity:1, bgFit:"cover",
   // COMPOSITING
   shaderOpacity:1.0, blend:"normal",
+  // CANVAS — the whole composition size + aspect (also the export size)
+  canvasW:1280, canvasH:720, canvasAspect:"16:9",
   // EXPORT
-  exportW:1280, exportDur:3, exportFps:15, exportTransparent:true,
+  exportDur:3, exportFps:15, exportTransparent:true,
   // EXPORT FRAME (crop) — normalized to the preview (0..1)
   cropOn:false, cropX:0.2, cropY:0.15, cropW:0.6, cropH:0.6, cropAspect:"free",
 };
@@ -389,7 +391,7 @@ function sourceTransform(){
 /* ---------------------------------------------------------------- Resize  */
 function fitPreview(){
   const stage=document.getElementById("stage"), prev=document.getElementById("preview");
-  const cw=stage.clientWidth, ch=stage.clientHeight, ar=16/9;
+  const cw=stage.clientWidth, ch=stage.clientHeight, ar=(P.canvasW||16)/(P.canvasH||9);
   let w=cw, h=cw/ar;
   if(h>ch){ h=ch; w=ch*ar; }
   prev.style.width=Math.max(2,Math.floor(w))+"px";
@@ -592,6 +594,12 @@ const SECTIONS = [
       ["normal","Normal"],["screen","Screen"],["lighten","Lighten"],
       ["multiply","Multiply"],["overlay","Overlay"],["soft-light","Soft Light"]], onchange:updateComposite},
   ]],
+  ["Canvas", [
+    {t:"select", k:"canvasAspect", l:"Aspect ratio", opts:[["16:9","16:9 Landscape"],["9:16","9:16 Story"],["1:1","1:1 Square"],["4:5","4:5 Portrait"],["5:4","5:4"],["4:3","4:3"],["3:4","3:4"],["3:2","3:2"],["2:3","2:3"],["21:9","21:9 Wide"],["custom","Custom"]], onchange:()=>{ applyCanvasAspect("w"); clampCanvas(); onCanvasChange(); }},
+    {t:"num", k:"canvasW", l:"Width", unit:"px", min:16, get:()=>P.canvasW, set:setCanvasW},
+    {t:"num", k:"canvasH", l:"Height", unit:"px", min:16, get:()=>P.canvasH, set:setCanvasH},
+    {t:"note", html:"Sets the whole canvas shape and export size. The background fills edge to edge. Pick <b>Custom</b> to size width &amp; height freely."},
+  ]],
   ["Export Frame", [
     {t:"check", k:"cropOn", l:"Crop to frame", onchange:()=>{ updateCropOverlay(); applyVisibility(); }},
     {t:"select", k:"cropAspect", l:"Aspect", opts:[["free","Free"],["1:1","1:1 Square"],["4:5","4:5 Portrait"],["3:2","3:2"],["16:9","16:9"],["9:16","9:16 Story"]], onchange:()=>{ enforceAspect("w"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }, show:()=>P.cropOn},
@@ -599,10 +607,9 @@ const SECTIONS = [
     {t:"num", k:"cropH", l:"Height", unit:"px", min:2, get:cropPxH, set:setCropPxH, show:()=>P.cropOn},
     {t:"range", k:"cropX", l:"Position X", min:0,max:1,step:0.005, pct:true, onchange:()=>{ clampCrop(); updateCropOverlay(); }, show:()=>P.cropOn},
     {t:"range", k:"cropY", l:"Position Y", min:0,max:1,step:0.005, pct:true, onchange:()=>{ clampCrop(); updateCropOverlay(); }, show:()=>P.cropOn},
-    {t:"note", html:"Width/Height are the export pixels at the current <b>Resolution</b>. Drag the frame to move it, or its edges/corners to resize.", show:()=>P.cropOn},
+    {t:"note", html:"Width/Height are the export pixels within the canvas. Drag the frame to move it, or its edges/corners to resize.", show:()=>P.cropOn},
   ]],
   ["Export", [
-    {t:"select", k:"exportW", l:"Resolution", opts:[["640","640 px"],["960","960 px"],["1280","1280 px"],["1920","1920 px (HD)"],["2560","2560 px"],["3840","3840 px (4K)"]], parse:parseInt, onchange:()=>{ if(P.cropOn) syncCropWidgets(); }},
 
     {t:"sub", l:"Still image"},
     {t:"check", k:"exportTransparent", l:"Transparent background"},
@@ -787,17 +794,14 @@ function setStatus(msg){ if(!msg){statusEl.style.display="none";return;} statusE
 const wait = ms => new Promise(r=>setTimeout(r,ms));
 const nextFrame = () => new Promise(r=>requestAnimationFrame(r));
 
-function exportSize(){
-  const w = Math.round(P.exportW);
-  let h = Math.round(w * (cssH/Math.max(1,cssW)));
-  h += (h%2); // even for video codecs
-  return {w, h};
+function exportSize(){ // full canvas = export size
+  return { w: Math.max(2,Math.round(P.canvasW)), h: Math.max(2,Math.round(P.canvasH)) };
 }
 const tmp2d = document.createElement("canvas");
 const tctx = tmp2d.getContext("2d");
 // crop sub-rectangle (in full-render pixels) + output size; identity when the frame is off
 function cropRectPx(w,h,even){
-  if(!P.cropOn) return {sx:0,sy:0,sw:w,sh:h,ow:w,oh:h};
+  if(!P.cropOn){ let ow=w,oh=h; if(even){ ow-=ow%2; oh-=oh%2; } return {sx:0,sy:0,sw:w,sh:h,ow:Math.max(2,ow),oh:Math.max(2,oh)}; }
   let sw=Math.max(2,Math.round(P.cropW*w)), sh=Math.max(2,Math.round(P.cropH*h));
   let sx=Math.round(P.cropX*w), sy=Math.round(P.cropY*h);
   sx=Math.max(0,Math.min(sx,w-sw)); sy=Math.max(0,Math.min(sy,h-sh));
@@ -1470,11 +1474,25 @@ function syncCropWidgets(){
   scheduleSession();
 }
 // crop size in export pixels (at the current Resolution)
-function exportFullDims(){ const w=Math.round(P.exportW); return {w, h:Math.round(w*(cssH/Math.max(1,cssW)))}; }
+function exportFullDims(){ return {w:Math.max(2,Math.round(P.canvasW)), h:Math.max(2,Math.round(P.canvasH))}; }
 function cropPxW(){ return Math.round(P.cropW*exportFullDims().w); }
 function cropPxH(){ return Math.round(P.cropH*exportFullDims().h); }
 function setCropPxW(px){ const d=exportFullDims(); P.cropW=Math.min(1,Math.max(0.02, px/d.w)); enforceAspect("w"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }
 function setCropPxH(px){ const d=exportFullDims(); P.cropH=Math.min(1,Math.max(0.02, px/d.h)); enforceAspect("h"); clampCrop(); updateCropOverlay(); syncCropWidgets(); }
+
+/* --------------------------------------------------------- Canvas size / aspect */
+const CANVAS_ASPECTS={ "custom":0, "16:9":16/9, "9:16":9/16, "1:1":1, "4:5":4/5, "5:4":5/4, "4:3":4/3, "3:4":3/4, "3:2":3/2, "2:3":2/3, "21:9":21/9 };
+function canvasAspectR(){ return CANVAS_ASPECTS[P.canvasAspect]||0; }
+function clampCanvas(){ P.canvasW=Math.round(Math.min(4096,Math.max(16,P.canvasW||16))); P.canvasH=Math.round(Math.min(4096,Math.max(16,P.canvasH||16))); }
+function applyCanvasAspect(master){ const R=canvasAspectR(); if(!R) return; if(master==="h"){ P.canvasW=Math.round(P.canvasH*R); } else { P.canvasH=Math.round(P.canvasW/R); } }
+function setCanvasW(px){ P.canvasW=px; applyCanvasAspect("w"); clampCanvas(); onCanvasChange(); }
+function setCanvasH(px){ P.canvasH=px; applyCanvasAspect("h"); clampCanvas(); onCanvasChange(); }
+function onCanvasChange(){ resize(); updateCropOverlay(); syncCanvasWidgets(); }
+function syncCanvasWidgets(){
+  document.querySelectorAll(".row").forEach(row=>{ const c=row._spec; if(c && (c.k==="canvasW"||c.k==="canvasH"||c.k==="canvasAspect") && row._set) row._set(P[c.k]); });
+  if(activePreset!==""){ activePreset=""; updateActiveHighlight(); }
+  scheduleSession();
+}
 
 /* --------------------------------------------------------------- Startup */
 buildUI();
