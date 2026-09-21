@@ -316,10 +316,12 @@ function makeFBO(w,h){
 }
 let RW=1, RH=1, cssW=1, cssH=1, forceSize=null;
 let fboSrc, smoothA, smoothB, blurT, blurO, smoothPrimed;
+// frame-locking: advance the source pipeline only on new video frames (fixes loop-seam glitch)
+let videoNewFrame=false, rvfcOn=false, lastSmooth=null, forceUpdate=true;
 function allocFBOs(w,h){
   [fboSrc,smoothA,smoothB,blurT,blurO].forEach(f=>{ if(f){gl.deleteTexture(f.tex);gl.deleteFramebuffer(f.fb);} });
   fboSrc=makeFBO(w,h); smoothA=makeFBO(w,h); smoothB=makeFBO(w,h);
-  blurT=makeFBO(w,h);  blurO=makeFBO(w,h); smoothPrimed=false;
+  blurT=makeFBO(w,h);  blurO=makeFBO(w,h); smoothPrimed=false; lastSmooth=null;
 }
 
 /* --------------------------------------------------------- Source texture */
@@ -420,32 +422,45 @@ function drawTo(fbo, prog){
 function hex2rgb(h){ const n=parseInt(h.slice(1),16); return [((n>>16)&255)/255,((n>>8)&255)/255,(n&255)/255]; }
 
 function render(){
-  resize(); uploadSource();
+  resize();
   gl.disable(gl.BLEND);
 
-  const t = sourceTransform();
-  drawTo(fboSrc, progCopy);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, srcTex);
-  gl.uniform1i(gl.getUniformLocation(progCopy,"uTex"),0);
-  gl.uniform2f(gl.getUniformLocation(progCopy,"uScale"), t.sx, t.sy);
-  gl.uniform2f(gl.getUniformLocation(progCopy,"uOffset"), t.ox, t.oy);
-  gl.drawArrays(gl.TRIANGLES,0,3);
+  // Advance the source pipeline only on genuinely new content — for video that means
+  // a newly-decoded frame (requestVideoFrameCallback). This frame-locks the dots to the
+  // video so temporal smoothing can't over-blend during the loop-restart stall.
+  let updated;
+  if(srcKind==="video" && haveVideo){ updated = forceUpdate || !smoothPrimed || (rvfcOn ? videoNewFrame : true); }
+  else { updated = true; } // image / GIF / animated placeholder update every frame
+  videoNewFrame=false; forceUpdate=false;
 
-  const k = 1.0 - P.smoothing;
-  drawTo(smoothA, progSmooth);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, smoothB.tex);
-  gl.uniform1i(gl.getUniformLocation(progSmooth,"uPrev"),0);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, fboSrc.tex);
-  gl.uniform1i(gl.getUniformLocation(progSmooth,"uCur"),1);
-  gl.uniform1f(gl.getUniformLocation(progSmooth,"uK"), smoothPrimed? k : 1.0);
-  gl.drawArrays(gl.TRIANGLES,0,3);
-  smoothPrimed = true;
-  let cur = smoothA; { const tmp=smoothA; smoothA=smoothB; smoothB=tmp; }
+  if(updated){
+    uploadSource();
+    const t = sourceTransform();
+    drawTo(fboSrc, progCopy);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    gl.uniform1i(gl.getUniformLocation(progCopy,"uTex"),0);
+    gl.uniform2f(gl.getUniformLocation(progCopy,"uScale"), t.sx, t.sy);
+    gl.uniform2f(gl.getUniformLocation(progCopy,"uOffset"), t.ox, t.oy);
+    gl.drawArrays(gl.TRIANGLES,0,3);
 
-  let source = cur;
+    const k = 1.0 - P.smoothing;
+    drawTo(smoothA, progSmooth);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, smoothB.tex);
+    gl.uniform1i(gl.getUniformLocation(progSmooth,"uPrev"),0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, fboSrc.tex);
+    gl.uniform1i(gl.getUniformLocation(progSmooth,"uCur"),1);
+    gl.uniform1f(gl.getUniformLocation(progSmooth,"uK"), smoothPrimed? k : 1.0);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+    smoothPrimed = true;
+    let cur = smoothA; { const tmp=smoothA; smoothA=smoothB; smoothB=tmp; }
+    lastSmooth = cur;
+  }
+  if(!lastSmooth){ requestAnimationFrame(render); return; }
+
+  let source = lastSmooth;
   if(P.blur > 0.5){
     drawTo(blurT, progBlur);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, cur.tex);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, lastSmooth.tex);
     gl.uniform1i(gl.getUniformLocation(progBlur,"uTex"),0);
     gl.uniform2f(gl.getUniformLocation(progBlur,"uDir"), 1.0/RW, 0.0);
     gl.uniform1f(gl.getUniformLocation(progBlur,"uRadius"), P.blur);
@@ -753,10 +768,17 @@ function buildGradientEditor(){
 let gradientEditorRef=null;
 
 /* --------------------------------------------------------- File loaders  */
+function startRVFC(){                       // fire a flag on each newly-decoded video frame
+  if(rvfcOn || !video.requestVideoFrameCallback) return;
+  rvfcOn=true;
+  const cb=()=>{ videoNewFrame=true; try{ video.requestVideoFrameCallback(cb); }catch(e){ rvfcOn=false; } };
+  video.requestVideoFrameCallback(cb);
+}
 function loadSourceVideo(file){
   const url=URL.createObjectURL(file);
   video.src=url; video.loop=P.srcLoop; video.playbackRate=P.srcSpeed;
-  video.play().catch(()=>{}); haveVideo=true; srcKind="video"; smoothPrimed=false;
+  video.play().catch(()=>{}); haveVideo=true; srcKind="video"; smoothPrimed=false; forceUpdate=true;
+  startRVFC();
 }
 let srcImageDataURL=null; // original image bytes, kept for the self-contained export
 function loadSourceImage(file){
@@ -1103,7 +1125,7 @@ function syncUI(){
   if(gradientEditorRef) gradientEditorRef._rebuild();
   if(video){ video.playbackRate=P.srcSpeed; video.loop=P.srcLoop; }
   updateBackground(); updateComposite(); applyVisibility();
-  updateCropOverlay(); updateActiveHighlight(); scheduleSession();
+  updateCropOverlay(); updateActiveHighlight(); scheduleSession(); forceUpdate=true;
 }
 
 function buildPresetsUI(){
@@ -1438,6 +1460,7 @@ function redo(){ if(histIdx<hist.length-1){ histIdx++; applyHistoryState(hist[hi
 
 /* keep the Source sliders in sync when panning/zooming with the mouse */
 function syncSourceWidgets(){
+  forceUpdate=true;
   document.querySelectorAll(".row").forEach(row=>{ const c=row._spec; if(c && (c.k==="srcX"||c.k==="srcY"||c.k==="srcScale") && row._set) row._set(P[c.k]); });
   if(activePreset!==""){ activePreset=""; updateActiveHighlight(); }
   scheduleSession();
@@ -1500,7 +1523,7 @@ const _sess = loadSession(); if(_sess) applyParams(_sess);
 updateBackground(); updateComposite(); resize();
 
 const _panel = document.getElementById("panel");
-function onPanelEdit(){ scheduleSession(); scheduleHistory(); if(activePreset!==""){ activePreset=""; updateActiveHighlight(); } }
+function onPanelEdit(){ forceUpdate=true; scheduleSession(); scheduleHistory(); if(activePreset!==""){ activePreset=""; updateActiveHighlight(); } }
 _panel.addEventListener("input", onPanelEdit);
 _panel.addEventListener("change", onPanelEdit);
 window.addEventListener("beforeunload", persistSession);
