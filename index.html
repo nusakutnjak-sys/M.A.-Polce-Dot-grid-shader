@@ -187,7 +187,7 @@ const DEFAULTS = {
   // CANVAS — the whole composition size + aspect (also the export size)
   canvasW:1280, canvasH:720, canvasAspect:"16:9",
   // EXPORT
-  exportDur:3, exportFps:15, exportTransparent:true,
+  exportDur:3, exportFps:15, exportTransparent:true, videoQuality:"high",
   // EXPORT FRAME (crop) — normalized to the preview (0..1)
   cropOn:false, cropX:0.2, cropY:0.15, cropW:0.6, cropH:0.6, cropAspect:"free",
 };
@@ -634,9 +634,10 @@ const SECTIONS = [
     {t:"sub", l:"Animated & video"},
     {t:"range", k:"exportDur", l:"Duration", min:1,max:10,step:0.5, unit:"s"},
     {t:"select", k:"exportFps", l:"Frame rate", opts:[["10","10 fps"],["15","15 fps"],["20","20 fps"],["25","25 fps"],["30","30 fps"]], parse:parseInt},
+    {t:"select", k:"videoQuality", l:"Video quality", opts:[["standard","Standard · 12 Mbps"],["high","High · 25 Mbps"],["max","Max · 50 Mbps"]]},
     {t:"buttons", buttons:[{l:"⬇ Animated PNG",fn:()=>runExport("apng")},{l:"⬇ GIF",fn:()=>runExport("gif")}]},
     {t:"buttons", buttons:[{l:"⬇ MP4",fn:()=>runExport("mp4")},{l:"⬇ WebM",fn:()=>runExport("webm")}]},
-    {t:"note", html:"PNG &amp; GIF = transparent dot layer, looping. MP4 &amp; WebM include the background."},
+    {t:"note", html:"PNG &amp; GIF = transparent dot layer, looping. MP4 &amp; WebM include the background. Higher <b>Video quality</b> = a crisper master to compress in HandBrake before shipping."},
 
     {t:"sub", l:"Embed code"},
     {t:"buttons", buttons:[{l:"⬇ Self-contained HTML",fn:()=>runExport("selfhtml"),primary:true},{l:"Copy",fn:()=>runExport("selfcopy")}]},
@@ -908,7 +909,9 @@ async function exportVideo(w,h,format){
   const comp=document.createElement("canvas"); comp.width=cr.ow; comp.height=cr.oh;
   const ctx=comp.getContext("2d");
   const stream=comp.captureStream(P.exportFps);
-  const rec=new MediaRecorder(stream, mime?{mimeType:mime,videoBitsPerSecond:12000000}:undefined);
+  const BR={standard:12e6, high:25e6, max:50e6};
+  const bitrate=BR[P.videoQuality]||25e6;
+  const rec=new MediaRecorder(stream, mime?{mimeType:mime,videoBitsPerSecond:bitrate}:undefined);
   const chunks=[]; rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
   const stopped=new Promise(r=>rec.onstop=r);
   rec.start();
