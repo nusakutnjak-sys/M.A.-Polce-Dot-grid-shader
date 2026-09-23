@@ -864,12 +864,20 @@ async function runExport(kind){
 
 /* -------- still image (PNG / JPEG), single frame of the composite -------- */
 async function exportStill(w,h){
-  await nextFrame(); // ensure a rendered frame at the export size
-  const full=fullCompositeCanvas(w,h, P.exportTransparent);
-  const cr=cropRectPx(w,h);
-  const comp=document.createElement("canvas"); comp.width=cr.ow; comp.height=cr.oh;
-  comp.getContext("2d").drawImage(full, cr.sx,cr.sy,cr.sw,cr.sh, 0,0,cr.ow,cr.oh);
-  const blob = await new Promise(res=> comp.toBlob(res, "image/png"));
+  // Supersample: render at up to 2x, then downscale -> smooth, crisp dot edges.
+  const SS = Math.max(1, Math.min(2, 4096/Math.max(w,h)));
+  const sw=Math.round(w*SS), sh=Math.round(h*SS);
+  if(SS>1.01){
+    setStatus("Rendering PNG…"); forceSize={w:sw,h:sh}; smoothPrimed=false;
+    await nextFrame(); await nextFrame(); await nextFrame(); await nextFrame();
+  } else { await nextFrame(); }
+  const full=fullCompositeCanvas(sw,sh, P.exportTransparent);
+  const cr=cropRectPx(sw,sh);
+  const out=document.createElement("canvas");
+  out.width=Math.max(1,Math.round(cr.ow/SS)); out.height=Math.max(1,Math.round(cr.oh/SS));
+  const ox=out.getContext("2d"); ox.imageSmoothingEnabled=true; ox.imageSmoothingQuality="high";
+  ox.drawImage(full, cr.sx,cr.sy,cr.sw,cr.sh, 0,0,out.width,out.height);
+  const blob = await new Promise(res=> out.toBlob(res, "image/png"));
   download(blob, "dot-grid.png");
   setStatus("PNG saved ✓"); await wait(1400);
 }
