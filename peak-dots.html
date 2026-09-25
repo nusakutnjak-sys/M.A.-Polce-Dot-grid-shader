@@ -59,10 +59,11 @@ for(let i=0;i<pos.count;i++){
   const y=V.y, u=Math.max(0,Math.min(1,(y+H/2)/H));
   const r=Math.hypot(V.x,V.z), th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th);
   const R=relief(nx,nz,u), S=spurs(nx,nz);
-  let disp = (0.60*(R-0.5) + 0.42*(S-0.5)) * (0.22+0.9*(1-u));   // ridges out / valleys in, stronger low
-  disp += 0.05*Math.sin(u*30.0 + R*5.0);                         // fine strata
+  let disp = (0.52*(R-0.5) + 0.16*(S-0.5)) * (0.25+0.85*(1-u));  // RADIAL ribs/couloirs (no upward spikes)
+  disp += 0.04*Math.sin(u*30.0 + R*5.0);                         // fine strata
   let nr=Math.max(0.02, r*(1+disp)); const s=r>1e-5?nr/r:0; V.x*=s; V.z*=s;
-  V.y = y + (0.42*(R-0.45) + 0.30*(S-0.45))*(1-u)*H;             // jagged silhouette + secondary summits, sharp apex
+  // vertical relief kept small and fading upward (1-u)^2 -> one clean apex, no secondary summits
+  V.y = y + (0.12*(R-0.5))*(1-u)*(1-u)*H;
   pos.setXYZ(i,V.x,V.y,V.z);
 }
 geo.computeVertexNormals();
