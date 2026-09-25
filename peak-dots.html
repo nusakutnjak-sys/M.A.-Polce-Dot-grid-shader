@@ -12,12 +12,13 @@
    rot = spin speed per frame (0 = still)   spin0 = starting angle (rad)
    seed = which mountain variation                                     */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
-const CONFIG={ camX:num('camX',0), camY:num('camY',0.45), camZ:num('camZ',3.7),
-  tgtX:num('tgtX',0), tgtY:num('tgtY',0.10), fov:num('fov',32),
+const CONFIG={ camX:num('camX',0), camY:num('camY',0.30), camZ:num('camZ',5.8),
+  tgtX:num('tgtX',0), tgtY:num('tgtY',0.02), fov:num('fov',32),
+  posX:num('posX',0), posY:num('posY',-0.55),        // move the peak in-frame (posY down = toward bottom)
   rot:num('rot',0.0015), spin0:num('spin0',0.7), seed:num('seed',1) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
-const P={ spacing:5, minSize:0.5, maxSize:2, dotOpacity:0.5, threshold:0, softness:1,
+const P={ spacing:10, minSize:1.0, maxSize:5.5, dotOpacity:0.6, threshold:0, softness:1,
   brightness:0.02, contrast:2.6, gamma:0.5, invert:0, cutoff:0.12, cutoffSoft:0.5, invertMask:0,
   chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:[1,1,1], shaderOpacity:1, refW:1920 };
 const KEYGREEN=0x00ff00;
@@ -87,7 +88,7 @@ for(let i=0;i<pos.count;i++){
 geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
 const peak=new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true}));
 peak.castShadow=true; peak.receiveShadow=true;   // self-shadow for crevice depth
-peak.rotation.y=CONFIG.spin0; tScene.add(peak);
+peak.position.set(CONFIG.posX,CONFIG.posY,0); peak.rotation.y=CONFIG.spin0; tScene.add(peak);
 
 /* ===================== dot-grid shader (transparent output) ===================== */
 const out=document.getElementById('out');
