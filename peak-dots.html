@@ -10,17 +10,19 @@
    camZ = zoom (bigger = further/smaller)   camY = camera height (frames peak up/down)
    tgtX/tgtY = look-at (nudge left-right / up-down)   fov = lens
    rot = spin speed per frame (0 = still)   spin0 = starting angle (rad)
-   seed = which mountain variation                                     */
+   seed = which mountain variation   posX/posY = move the peak in frame
+   snow = share of the rock that gets dots (0.58; lower = sparser)   cut = dot brightness cutoff (0.55)
+   dc = dot colour hex, e.g. dc=ffffff                                 */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
-const CONFIG={ camX:num('camX',0), camY:num('camY',0.30), camZ:num('camZ',5.8),
-  tgtX:num('tgtX',0), tgtY:num('tgtY',0.02), fov:num('fov',32),
-  posX:num('posX',0), posY:num('posY',-0.80),        // move the peak in-frame (posY down = toward bottom)
-  rot:num('rot',0.0015), spin0:num('spin0',-0.35), seed:num('seed',1) };
+const CONFIG={ camX:num('camX',0), camY:num('camY',1.44), camZ:num('camZ',5.44),
+  tgtX:num('tgtX',0), tgtY:num('tgtY',1.44), fov:num('fov',32),
+  posX:num('posX',-0.10), posY:num('posY',0),        // move the peak in-frame (posY down = toward bottom)
+  rot:num('rot',0.0015), spin0:num('spin0',0), seed:num('seed',1) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
-const P={ spacing:10, minSize:1.0, maxSize:5.5, dotOpacity:0.6, threshold:0, softness:1,
-  brightness:0.02, contrast:2.6, gamma:0.5, invert:0, cutoff:0.12, cutoffSoft:0.5, invertMask:0,
-  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:[1,1,1], shaderOpacity:1, refW:1920 };
+const P={ spacing:10, minSize:2.6, maxSize:5.2, dotOpacity:0.62, threshold:0, softness:1,
+  brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
+  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refW:1920 };
 const KEYGREEN=0x00ff00;
 
 /* ===================== Three.js peak -> hidden source canvas (on green) ===================== */
@@ -32,7 +34,7 @@ const tCam=new THREE.PerspectiveCamera(CONFIG.fov,1,0.1,100); tCam.position.set(
 tScene.add(new THREE.HemisphereLight(0xdfe8ff,0x2a1e16,0.30));                // lower fill -> deeper shadows
 const key=new THREE.DirectionalLight(0xfff1df,1.45); key.position.set(-3.5,5.5,5); key.castShadow=true;
 key.shadow.mapSize.set(2048,2048); key.shadow.camera.near=0.5; key.shadow.camera.far=22;
-key.shadow.camera.left=-1.9;key.shadow.camera.right=1.9;key.shadow.camera.top=2.1;key.shadow.camera.bottom=-1.7;
+key.shadow.camera.left=-2.6;key.shadow.camera.right=2.6;key.shadow.camera.top=2.6;key.shadow.camera.bottom=-2.6;
 key.shadow.bias=-0.0006; tScene.add(key);
 const rim=new THREE.DirectionalLight(0xbcd2ff,0.28); rim.position.set(4,1.5,-4); tScene.add(rim);
 
@@ -44,9 +46,25 @@ function fbm(x,y,z){let a=0,amp=0.5,f=1;for(let o=0;o<5;o++){a+=amp*vnoise(x*f,y
 function snoise(x,y,z){return vnoise(x,y,z)*2-1;}
 function ridgedMF(x,y,z){ let sum=0,f=1,w=0.55,prev=1; for(let o=0;o<6;o++){ let n=1-Math.abs(snoise(x*f,y*f,z*f)); n=n*n; sum+=n*w*prev; prev=Math.min(1,n*2.2); f*=2.07; w*=0.5; } return sum; } // 0..~1, sharp ridges
 
-/* ---- build a rugged asymmetric peak ---- */
-const H=1.62,RB=1.32, geo=new THREE.ConeGeometry(RB,H,340,280,false), V=new THREE.Vector3();
-const pos=geo.attributes.position;
+/* ---- build the massif from the reference skyline ----
+   PROF = front-view skyline (x, height) traced from the reference image (1 unit = 400px of the 2000px ref,
+   apex at x=0). The heightfield is that skyline "dilated" by a cone: seen from the front the silhouette
+   matches the reference, and every cross-section is a pyramid, so it still reads as a peak while rotating. */
+const PROF=[[-1.62,0],[-1.47,0.40],[-1.36,0.49],[-1.30,0.60],[-1.18,0.58],[-1.05,0.57],[-0.90,0.585],[-0.78,0.60],
+  [-0.73,0.74],[-0.67,0.84],[-0.60,0.91],[-0.50,1.06],[-0.43,1.22],[-0.37,1.28],[-0.31,1.28],[-0.25,1.25],[-0.18,1.33],
+  [-0.12,1.44],[-0.06,1.52],[-0.03,1.565],[0.0,1.58],[0.03,1.555],[0.06,1.53],[0.09,1.49],[0.14,1.45],[0.23,1.41],[0.33,1.39],[0.40,1.36],
+  [0.50,1.25],[0.60,1.10],[0.70,0.93],[0.82,0.80],[0.97,0.60],[1.08,0.47],[1.17,0.38],[1.30,0.26],[1.40,0.24],
+  [1.50,0.27],[1.60,0.22],[1.69,0.15],[1.80,0]];
+const H=1.58, KX=2.7, AZ=0.5;             // H = apex height; KX keeps the skyline; side slope = KX*AZ (~1.3, like the old cone)
+function prof(x){ if(x<=PROF[0][0]||x>=PROF[PROF.length-1][0]) return 0;
+  for(let k=1;k<PROF.length;k++){ const a=PROF[k-1],b=PROF[k]; if(x<=b[0]) return a[1]+(b[1]-a[1])*(x-a[0])/(b[0]-a[0]); } return 0; }
+const PS=[]; for(let x=PROF[0][0];x<=PROF[PROF.length-1][0];x+=0.008) PS.push(x,prof(x));
+function massif(x,z){ let best=0; const zz=(AZ*z)*(AZ*z), reach=H/KX;
+  for(let k=0;k<PS.length;k+=2){ const dx=x-PS[k]; if(dx>reach) continue; if(dx<-reach) break;
+    const v=PS[k+1]-KX*Math.sqrt(dx*dx+zz); if(v>best) best=v; } return best; }
+const GX0=-1.75, GX1=2.0, GZ=1.35;
+const geo=new THREE.PlaneGeometry(GX1-GX0, 2*GZ, 470, 340); geo.rotateX(-Math.PI/2); geo.translate((GX0+GX1)/2,0,0);
+const V=new THREE.Vector3(), pos=geo.attributes.position;
 function relief(nx,nz,u){
   // domain-warp then ridged MF -> sharp aretes + couloirs
   const wx=nx*1.9 + 0.45*fbm(nx*3.1,u*2.6,nz*3.1);
@@ -54,44 +72,45 @@ function relief(nx,nz,u){
   return ridgedMF(wx, u*1.7, wz);
 }
 function spurs(nx,nz){ return ridgedMF(nx*0.85, 3.3, nz*0.85); } // few big radiating ridges / secondary summits
-// one subsidiary summit (left shoulder), lower than the apex + a smaller opposite spur for asymmetry
-const TH2=2.45, TH3=-1.15;
-function angDist(a,c){ return Math.abs((((a-c)+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI); }
+const HT=new Float32Array(pos.count);   // base heights (0 = ground)
 for(let i=0;i<pos.count;i++){
   V.fromBufferAttribute(pos,i);
-  const y=V.y, u=Math.max(0,Math.min(1,(y+H/2)/H));
-  const r=Math.hypot(V.x,V.z), th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th);
-  const R=relief(nx,nz,u), S=spurs(nx,nz);
-  // angular masks for the shoulder + minor spur
-  const m2=Math.exp(-Math.pow(angDist(th,TH2)/0.60,2));
-  const m3=Math.exp(-Math.pow(angDist(th,TH3)/0.48,2));
-  // subsidiary summit: a rounded rise peaking mid-height (never above the apex, no spike)
-  const shoulder = m2*Math.exp(-Math.pow((u-0.44)/0.20,2)) + 0.5*m3*Math.exp(-Math.pow((u-0.30)/0.22,2));
-  let disp = (0.50*(R-0.5) + 0.15*(S-0.5)) * (0.25+0.85*(1-u));  // RADIAL ribs/couloirs (no upward spikes)
-  disp += (0.22*m2 + 0.16*m3)*(1-u);                            // broaden the base under the shoulder (wide spread)
-  disp += 0.04*Math.sin(u*30.0 + R*5.0);                         // fine strata
-  let nr=Math.max(0.02, r*(1+disp)); const s=r>1e-5?nr/r:0; V.x*=s; V.z*=s;
-  // vertical relief kept small and fading upward (1-u)^2 -> one clean apex; + a lower side shoulder
-  V.y = y + (0.12*(R-0.5))*(1-u)*(1-u)*H + 0.33*shoulder*H;
+  let h=massif(V.x,V.z);
+  if(h>0.002){
+    const u=Math.min(1,h/H), th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th);
+    const R=relief(nx,nz,u), S=spurs(nx,nz), C=fbm(V.x*3.3+7, h*3.0, V.z*3.3+3);
+    // ribs/couloirs radiating from the summit + crags; fade out at ground level and ease off at the apex
+    h += (0.17*(R-0.5) + 0.05*(S-0.5) + 0.09*(C-0.5)) * Math.min(1,h/0.3) * (0.3+0.7*(1-u));
+    h += 0.012*Math.sin(u*34.0 + R*5.0);                        // fine strata
+  }
+  HT[i]=h; V.y = h>0.002 ? h : -0.02;
   pos.setXYZ(i,V.x,V.y,V.z);
 }
 geo.computeVertexNormals();
 
 /* ---- vertex colours: tan rock ridges, dark crevices, white snow couloirs ---- */
 const nrm=geo.attributes.normal, col=[];
-const rockTan=[0.76,0.58,0.39], rockMid=[0.48,0.32,0.20], rockDark=[0.14,0.08,0.06], snow=[0.98,0.97,0.95]; // wider albedo range
+// snow field value per vertex; threshold picked so snow covers a fixed share of the rock (URL ?snow=0.45)
+const SF=new Float32Array(pos.count), sfv=[];
+for(let i=0;i<pos.count;i++){ if(HT[i]<=0.002) continue; V.fromBufferAttribute(pos,i);
+  const u=Math.min(1,HT[i]/H), th=Math.atan2(V.z,V.x), R=relief(Math.cos(th),Math.sin(th),u), up=Math.max(0,nrm.getY(i));
+  const F=fbm(V.x*7.0+2, HT[i]*6.0, V.z*7.0+9), G=fbm(V.x*15.0+5, HT[i]*13.0, V.z*15.0+1);
+  SF[i]=0.22*(1-R) + 0.36*F + 0.32*G + 0.10*up; sfv.push(SF[i]); }
+sfv.sort((a,b)=>a-b); const SNOW_LO=sfv[Math.floor(sfv.length*(1-num('snow',0.58)))]-0.03;
+const rockTan=[0.14,0.10,0.065], rockMid=[0.05,0.035,0.024], rockDark=[0.008,0.006,0.005], snow=[0.98,0.97,0.95]; // linear: dark rock = gaps, snow = dots
 function ss(e0,e1,x){x=Math.max(0,Math.min(1,(x-e0)/(e1-e0)));return x*x*(3-2*x);}
 function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
 for(let i=0;i<pos.count;i++){
   V.fromBufferAttribute(pos,i);
-  const u=Math.max(0,Math.min(1,(V.y+H/2)/H));
+  if(HT[i]<=0.002){ col.push(0,0,0); continue; }            // ground = black -> below the cutoff -> no dots
+  const u=Math.max(0,Math.min(1,HT[i]/H));
   const th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th), up=Math.max(0,nrm.getY(i));
   const R=relief(nx,nz,u);
   let c=mix(rockDark, rockTan, ss(0.2,0.72, R));           // ridges lighter, crevices dark
   c=mix(c, rockMid, ss(0.5,0.15, R)*0.35);
-  let sn = ss(0.30,0.82,u) * ss(0.55,0.12, R) * (0.3+0.7*up); // snow in couloirs (low relief), up-facing, high
-  sn = Math.max(sn, ss(0.9,1.0,u)*0.85);                    // summit cap
-  sn *= (0.55+0.45*ss(0.35,0.7, fbm(nx*4+2,u*5,nz*4)));     // patchy streaks
+  // snow patches: couloirs (low relief) + blotchy fields + up-facing ledges -> ~half the surface, like the reference
+  let sn = ss(SNOW_LO, SNOW_LO+0.06, SF[i]);
+  sn = Math.max(sn, ss(0.92,1.0,u)*0.9);                    // summit cap
   c=mix(c, snow, sn);
   col.push(c[0],c[1],c[2]);
 }
