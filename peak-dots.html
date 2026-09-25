@@ -10,7 +10,7 @@
    camZ = zoom (bigger = further/smaller)   camY = camera height (frames peak up/down)
    tgtX/tgtY = look-at (nudge left-right / up-down)   fov = lens
    rot = spin speed per frame (0 = still)   spin0 = starting angle (rad)
-   seed = which mountain variation   posX/posY = move the peak in frame
+   seed = which mountain variation   posX/posY = move the peak in frame   size = scale (0.85)
    snow = share of the rock that gets dots (0.58; lower = sparser)   cut = dot brightness cutoff (0.55)
    dc = dot colour hex, e.g. dc=ffffff                                 */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
@@ -20,7 +20,8 @@ if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.sty
 const CONFIG={ camX:num('camX',0), camY:num('camY',1.44), camZ:num('camZ',5.44),
   tgtX:num('tgtX',0), tgtY:num('tgtY',1.44), fov:num('fov',32),
   posX:num('posX',-0.10), posY:num('posY',0),        // move the peak in-frame (posY down = toward bottom)
-  rot:num('rot',0.0015), spin0:num('spin0',0), seed:num('seed',1) };
+  rot:num('rot',0.0015), spin0:num('spin0',0), seed:num('seed',1),
+  size:num('size',0.85) };                              // overall mountain scale (anchored at its base)
 
 /* ===================== baked dot-style params (your preset) ===================== */
 const P={ spacing:10, minSize:2.6, maxSize:5.2, dotOpacity:0.62, threshold:0, softness:1,
@@ -137,7 +138,7 @@ for(let i=0;i<pos.count;i++){
 geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
 const peak=new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true}));
 peak.castShadow=true; peak.receiveShadow=true;   // self-shadow for crevice depth
-peak.position.set(CONFIG.posX,CONFIG.posY,0); peak.rotation.y=CONFIG.spin0; tScene.add(peak);
+peak.position.set(CONFIG.posX,CONFIG.posY,0); peak.scale.setScalar(CONFIG.size); peak.rotation.y=CONFIG.spin0; tScene.add(peak);
 
 /* ===================== dot-grid shader (transparent output) ===================== */
 const out=document.getElementById('out');
