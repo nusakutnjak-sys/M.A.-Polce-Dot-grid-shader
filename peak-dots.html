@@ -18,18 +18,22 @@ const CONFIG={ camX:num('camX',0), camY:num('camY',0.45), camZ:num('camZ',3.7),
 
 /* ===================== baked dot-style params (your preset) ===================== */
 const P={ spacing:5, minSize:0.5, maxSize:2, dotOpacity:0.5, threshold:0, softness:1,
-  brightness:0, contrast:3, gamma:0.33, invert:0, cutoff:0.14, cutoffSoft:0.57, invertMask:0,
+  brightness:0.02, contrast:2.6, gamma:0.5, invert:0, cutoff:0.12, cutoffSoft:0.5, invertMask:0,
   chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:[1,1,1], shaderOpacity:1, refW:1920 };
 const KEYGREEN=0x00ff00;
 
 /* ===================== Three.js peak -> hidden source canvas (on green) ===================== */
 const src=document.createElement('canvas');
 const three=new THREE.WebGLRenderer({canvas:src,antialias:true}); three.setPixelRatio(1); three.outputEncoding=THREE.sRGBEncoding;
+three.shadowMap.enabled=true; three.shadowMap.type=THREE.PCFSoftShadowMap;   // self-shadowing = strong dark crevices
 const tScene=new THREE.Scene(); tScene.background=new THREE.Color(KEYGREEN);
 const tCam=new THREE.PerspectiveCamera(CONFIG.fov,1,0.1,100); tCam.position.set(CONFIG.camX,CONFIG.camY,CONFIG.camZ); tCam.lookAt(CONFIG.tgtX,CONFIG.tgtY,0);
-tScene.add(new THREE.HemisphereLight(0xe7eeff,0x3a2a1e,0.5));
-const key=new THREE.DirectionalLight(0xfff3e4,1.1); key.position.set(-3.5,5,6); tScene.add(key);
-const rim=new THREE.DirectionalLight(0xbcd2ff,0.32); rim.position.set(4,1.5,-4); tScene.add(rim);
+tScene.add(new THREE.HemisphereLight(0xdfe8ff,0x2a1e16,0.30));                // lower fill -> deeper shadows
+const key=new THREE.DirectionalLight(0xfff1df,1.45); key.position.set(-3.5,5.5,5); key.castShadow=true;
+key.shadow.mapSize.set(2048,2048); key.shadow.camera.near=0.5; key.shadow.camera.far=22;
+key.shadow.camera.left=-1.9;key.shadow.camera.right=1.9;key.shadow.camera.top=2.1;key.shadow.camera.bottom=-1.7;
+key.shadow.bias=-0.0006; tScene.add(key);
+const rim=new THREE.DirectionalLight(0xbcd2ff,0.28); rim.position.set(4,1.5,-4); tScene.add(rim);
 
 /* ---- noise: value noise + fBm + ridged multifractal ---- */
 const SEED=CONFIG.seed*97.13;
@@ -64,7 +68,7 @@ geo.computeVertexNormals();
 
 /* ---- vertex colours: tan rock ridges, dark crevices, white snow couloirs ---- */
 const nrm=geo.attributes.normal, col=[];
-const rockTan=[0.72,0.55,0.37], rockMid=[0.50,0.34,0.22], rockDark=[0.24,0.14,0.10], snow=[0.95,0.94,0.92];
+const rockTan=[0.76,0.58,0.39], rockMid=[0.48,0.32,0.20], rockDark=[0.14,0.08,0.06], snow=[0.98,0.97,0.95]; // wider albedo range
 function ss(e0,e1,x){x=Math.max(0,Math.min(1,(x-e0)/(e1-e0)));return x*x*(3-2*x);}
 function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
 for(let i=0;i<pos.count;i++){
@@ -82,6 +86,7 @@ for(let i=0;i<pos.count;i++){
 }
 geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
 const peak=new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true}));
+peak.castShadow=true; peak.receiveShadow=true;   // self-shadow for crevice depth
 peak.rotation.y=CONFIG.spin0; tScene.add(peak);
 
 /* ===================== dot-grid shader (transparent output) ===================== */
