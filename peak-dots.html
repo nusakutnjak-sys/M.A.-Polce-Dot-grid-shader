@@ -14,6 +14,9 @@
    snow = share of the rock that gets dots (0.58; lower = sparser)   cut = dot brightness cutoff (0.55)
    dc = dot colour hex, e.g. dc=ffffff                                 */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+// opened directly (not in an iframe) -> show the preset gradient so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
+let framed=true; try{ framed=window.self!==window.top; }catch(e){}
+if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='linear-gradient(173deg,#0a0f2c 0%,#0243ac 45%,#f0f1f3 90%) fixed';
 const CONFIG={ camX:num('camX',0), camY:num('camY',1.44), camZ:num('camZ',5.44),
   tgtX:num('tgtX',0), tgtY:num('tgtY',1.44), fov:num('fov',32),
   posX:num('posX',-0.10), posY:num('posY',0),        // move the peak in-frame (posY down = toward bottom)
