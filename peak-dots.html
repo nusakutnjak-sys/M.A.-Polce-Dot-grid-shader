@@ -12,10 +12,10 @@
    rot = spin speed per frame (0 = still)   spin0 = starting angle (rad)
    seed = which mountain variation                                     */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
-const CONFIG={ camX:num('camX',0), camY:num('camY',0.30), camZ:num('camZ',5.8),
-  tgtX:num('tgtX',0), tgtY:num('tgtY',0.02), fov:num('fov',32),
-  posX:num('posX',0), posY:num('posY',-0.55),        // move the peak in-frame (posY down = toward bottom)
-  rot:num('rot',0.0015), spin0:num('spin0',0.7), seed:num('seed',1) };
+const CONFIG={ camX:num('camX',0), camY:num('camY',0.22), camZ:num('camZ',6.6),
+  tgtX:num('tgtX',0), tgtY:num('tgtY',0.05), fov:num('fov',32),
+  posX:num('posX',0), posY:num('posY',-0.88),        // move the peak in-frame (posY down = toward bottom)
+  rot:num('rot',0.0015), spin0:num('spin0',0.4), seed:num('seed',1) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
 const P={ spacing:10, minSize:1.0, maxSize:5.5, dotOpacity:0.6, threshold:0, softness:1,
@@ -45,25 +45,25 @@ function snoise(x,y,z){return vnoise(x,y,z)*2-1;}
 function ridgedMF(x,y,z){ let sum=0,f=1,w=0.55,prev=1; for(let o=0;o<6;o++){ let n=1-Math.abs(snoise(x*f,y*f,z*f)); n=n*n; sum+=n*w*prev; prev=Math.min(1,n*2.2); f*=2.07; w*=0.5; } return sum; } // 0..~1, sharp ridges
 
 /* ---- build a rugged asymmetric peak ---- */
-const H=1.62,RB=1.32, geo=new THREE.ConeGeometry(RB,H,340,280,false), V=new THREE.Vector3();
+const H=1.75,RB=1.5, geo=new THREE.ConeGeometry(RB,H,340,300,false), V=new THREE.Vector3();
 const pos=geo.attributes.position;
+const POWER=1.6, LEAN=0.13;     // concave spire (steep top, flaring base) + subtle summit lean
 function relief(nx,nz,u){
-  // domain-warp then ridged MF -> sharp aretes + couloirs
   const wx=nx*1.9 + 0.45*fbm(nx*3.1,u*2.6,nz*3.1);
   const wz=nz*1.9 + 0.45*fbm(nz*3.1+5,u*2.6,nx*3.1);
   return ridgedMF(wx, u*1.7, wz);
 }
-function spurs(nx,nz){ return ridgedMF(nx*0.85, 3.3, nz*0.85); } // few big radiating ridges / secondary summits
 for(let i=0;i<pos.count;i++){
   V.fromBufferAttribute(pos,i);
   const y=V.y, u=Math.max(0,Math.min(1,(y+H/2)/H));
-  const r=Math.hypot(V.x,V.z), th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th);
-  const R=relief(nx,nz,u), S=spurs(nx,nz);
-  let disp = (0.52*(R-0.5) + 0.16*(S-0.5)) * (0.25+0.85*(1-u));  // RADIAL ribs/couloirs (no upward spikes)
-  disp += 0.04*Math.sin(u*30.0 + R*5.0);                         // fine strata
-  let nr=Math.max(0.02, r*(1+disp)); const s=r>1e-5?nr/r:0; V.x*=s; V.z*=s;
-  // vertical relief kept small and fading upward (1-u)^2 -> one clean apex, no secondary summits
-  V.y = y + (0.12*(R-0.5))*(1-u)*(1-u)*H;
+  const th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th);
+  const R=relief(nx,nz,u);
+  const sp=Math.pow(1-u, POWER-1);                              // steep spire profile, flaring base
+  const disp = 0.42*(R-0.5)*(0.30+0.80*(1-u)) + 0.04*Math.sin(u*30.0+R*5.0); // radial ribs/couloirs
+  const rf=Math.max(0.02, 1+disp);
+  V.x = V.x*sp*rf + LEAN*u*u*RB;                                // spire scale + ribs + lean
+  V.z = V.z*sp*rf;
+  V.y = y + (0.10*(R-0.5))*(1-u)*(1-u)*H;                       // subtle crag, sharp single apex
   pos.setXYZ(i,V.x,V.y,V.z);
 }
 geo.computeVertexNormals();
@@ -79,11 +79,12 @@ for(let i=0;i<pos.count;i++){
   const th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th), up=Math.max(0,nrm.getY(i));
   const R=relief(nx,nz,u);
   let c=mix(rockDark, rockTan, ss(0.2,0.72, R));           // ridges lighter, crevices dark
-  c=mix(c, rockMid, ss(0.5,0.15, R)*0.35);
-  let sn = ss(0.30,0.82,u) * ss(0.55,0.12, R) * (0.3+0.7*up); // snow in couloirs (low relief), up-facing, high
-  sn = Math.max(sn, ss(0.9,1.0,u)*0.85);                    // summit cap
-  sn *= (0.55+0.45*ss(0.35,0.7, fbm(nx*4+2,u*5,nz*4)));     // patchy streaks
-  c=mix(c, snow, sn);
+  c=mix(c, rockDark, ss(0.34,0.02,u)*0.55);                // darker rock toward the base
+  let sn = ss(0.44,0.72,u)*(0.4+0.6*up)                    // broad snow field on the upper faces
+         + ss(0.34,0.70,u)*ss(0.6,0.12,R)*0.55;            // couloir streaks
+  sn = Math.max(sn, ss(0.86,1.0,u));                       // summit
+  sn *= (0.6+0.4*ss(0.32,0.72, fbm(nx*4+2,u*5,nz*4)));     // patchy
+  c=mix(c, snow, Math.min(1,sn));
   col.push(c[0],c[1],c[2]);
 }
 geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
