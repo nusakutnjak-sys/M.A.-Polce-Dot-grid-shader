@@ -26,7 +26,7 @@ const CONFIG={ camX:num('camX',0), camY:num('camY',1.44), camZ:num('camZ',5.44),
 /* ===================== baked dot-style params (your preset) ===================== */
 const P={ spacing:10, minSize:2.6, maxSize:5.2, dotOpacity:0.62, threshold:0, softness:1,
   brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
-  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refW:1920 };
+  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
 const KEYGREEN=0x00ff00;
 
 /* ===================== Three.js peak -> hidden source canvas (on green) ===================== */
@@ -170,7 +170,7 @@ function frame(){ if(!running){requestAnimationFrame(frame);return;} resize();
   peak.rotation.y+=CONFIG.rot; three.render(tScene,tCam);
   gl.viewport(0,0,RW,RH); gl.useProgram(prog);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src);
-  const ds=RW/P.refW;
+  const ds=RH/P.refH;   // dots scale with height, like the camera (vertical FOV) -> same dot density on the mountain at any aspect
   gl.uniform1i(U('uSrc'),0); gl.uniform2f(U('uRes'),RW,RH); gl.uniform1f(U('uCell'),Math.max(2,P.spacing)*ds);
   gl.uniform1f(U('uMinSize'),P.minSize*ds); gl.uniform1f(U('uMaxSize'),P.maxSize*ds); gl.uniform1f(U('uDotOpacity'),P.dotOpacity);
   gl.uniform3f(U('uDotColor'),P.dotColor[0],P.dotColor[1],P.dotColor[2]);
