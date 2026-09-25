@@ -4,39 +4,87 @@
 </head><body>
 <canvas id="out"></canvas>
 <script>
-/* ============ baked dot-style params (from your preset) ============ */
+/* ===================== POSITION / MOTION CONFIG =====================
+   Edit here, OR override in the iframe URL, e.g.
+   peak-dots.html?camZ=4.2&camY=0.6&tgtY=0.1&rot=0.001&spin0=0.8&seed=3
+   camZ = zoom (bigger = further/smaller)   camY = camera height (frames peak up/down)
+   tgtX/tgtY = look-at (nudge left-right / up-down)   fov = lens
+   rot = spin speed per frame (0 = still)   spin0 = starting angle (rad)
+   seed = which mountain variation                                     */
+const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+const CONFIG={ camX:num('camX',0), camY:num('camY',0.45), camZ:num('camZ',3.7),
+  tgtX:num('tgtX',0), tgtY:num('tgtY',0.10), fov:num('fov',32),
+  rot:num('rot',0.0015), spin0:num('spin0',0.7), seed:num('seed',1) };
+
+/* ===================== baked dot-style params (your preset) ===================== */
 const P={ spacing:5, minSize:0.5, maxSize:2, dotOpacity:0.5, threshold:0, softness:1,
   brightness:0, contrast:3, gamma:0.33, invert:0, cutoff:0.14, cutoffSoft:0.57, invertMask:0,
-  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:[1,1,1], shaderOpacity:1,
-  refW:1920 };                 // dot density is defined relative to a 1920-wide frame
+  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:[1,1,1], shaderOpacity:1, refW:1920 };
 const KEYGREEN=0x00ff00;
 
-/* ============ Three.js peak -> hidden source canvas (on green) ============ */
+/* ===================== Three.js peak -> hidden source canvas (on green) ===================== */
 const src=document.createElement('canvas');
-const three=new THREE.WebGLRenderer({canvas:src,antialias:true});
-three.setPixelRatio(1); three.outputEncoding=THREE.sRGBEncoding;
+const three=new THREE.WebGLRenderer({canvas:src,antialias:true}); three.setPixelRatio(1); three.outputEncoding=THREE.sRGBEncoding;
 const tScene=new THREE.Scene(); tScene.background=new THREE.Color(KEYGREEN);
-const tCam=new THREE.PerspectiveCamera(32,1,0.1,100); tCam.position.set(0,0.42,3.7); tCam.lookAt(0,0.12,0);
-tScene.add(new THREE.HemisphereLight(0xe7eeff,0x3a2a1e,0.55));
-const key=new THREE.DirectionalLight(0xfff3e4,1.05); key.position.set(-3.5,5,6); tScene.add(key);
-const rim=new THREE.DirectionalLight(0xbcd2ff,0.3); rim.position.set(4,1.5,-4); tScene.add(rim);
-function fract(x){return x-Math.floor(x);} function hash3(i,j,k){return fract(Math.sin(i*127.1+j*311.7+k*74.7)*43758.5453);} function smt(t){return t*t*(3-2*t);}
+const tCam=new THREE.PerspectiveCamera(CONFIG.fov,1,0.1,100); tCam.position.set(CONFIG.camX,CONFIG.camY,CONFIG.camZ); tCam.lookAt(CONFIG.tgtX,CONFIG.tgtY,0);
+tScene.add(new THREE.HemisphereLight(0xe7eeff,0x3a2a1e,0.5));
+const key=new THREE.DirectionalLight(0xfff3e4,1.1); key.position.set(-3.5,5,6); tScene.add(key);
+const rim=new THREE.DirectionalLight(0xbcd2ff,0.32); rim.position.set(4,1.5,-4); tScene.add(rim);
+
+/* ---- noise: value noise + fBm + ridged multifractal ---- */
+const SEED=CONFIG.seed*97.13;
+function fract(x){return x-Math.floor(x);} function hash3(i,j,k){return fract(Math.sin((i+SEED)*127.1+(j)*311.7+(k)*74.7)*43758.5453);} function smt(t){return t*t*(3-2*t);}
 function vnoise(x,y,z){const ix=Math.floor(x),iy=Math.floor(y),iz=Math.floor(z),fx=x-ix,fy=y-iy,fz=z-iz;const u=smt(fx),v=smt(fy),w=smt(fz);const L=(a,b,t)=>a+(b-a)*t,C=(dx,dy,dz)=>hash3(ix+dx,iy+dy,iz+dz);const x00=L(C(0,0,0),C(1,0,0),u),x10=L(C(0,1,0),C(1,1,0),u),x01=L(C(0,0,1),C(1,0,1),u),x11=L(C(0,1,1),C(1,1,1),u);return L(L(x00,x10,v),L(x01,x11,v),w);}
 function fbm(x,y,z){let a=0,amp=0.5,f=1;for(let o=0;o<5;o++){a+=amp*vnoise(x*f,y*f,z*f);f*=2.03;amp*=0.5;}return a;}
-function ridged(x,y,z){return 1-Math.abs(fbm(x,y,z)*2-1);}
+function snoise(x,y,z){return vnoise(x,y,z)*2-1;}
+function ridgedMF(x,y,z){ let sum=0,f=1,w=0.55,prev=1; for(let o=0;o<6;o++){ let n=1-Math.abs(snoise(x*f,y*f,z*f)); n=n*n; sum+=n*w*prev; prev=Math.min(1,n*2.2); f*=2.07; w*=0.5; } return sum; } // 0..~1, sharp ridges
+
+/* ---- build a rugged asymmetric peak ---- */
+const H=1.62,RB=1.32, geo=new THREE.ConeGeometry(RB,H,340,280,false), V=new THREE.Vector3();
+const pos=geo.attributes.position;
+function relief(nx,nz,u){
+  // domain-warp then ridged MF -> sharp aretes + couloirs
+  const wx=nx*1.9 + 0.45*fbm(nx*3.1,u*2.6,nz*3.1);
+  const wz=nz*1.9 + 0.45*fbm(nz*3.1+5,u*2.6,nx*3.1);
+  return ridgedMF(wx, u*1.7, wz);
+}
+function spurs(nx,nz){ return ridgedMF(nx*0.85, 3.3, nz*0.85); } // few big radiating ridges / secondary summits
+for(let i=0;i<pos.count;i++){
+  V.fromBufferAttribute(pos,i);
+  const y=V.y, u=Math.max(0,Math.min(1,(y+H/2)/H));
+  const r=Math.hypot(V.x,V.z), th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th);
+  const R=relief(nx,nz,u), S=spurs(nx,nz);
+  let disp = (0.60*(R-0.5) + 0.42*(S-0.5)) * (0.22+0.9*(1-u));   // ridges out / valleys in, stronger low
+  disp += 0.05*Math.sin(u*30.0 + R*5.0);                         // fine strata
+  let nr=Math.max(0.02, r*(1+disp)); const s=r>1e-5?nr/r:0; V.x*=s; V.z*=s;
+  V.y = y + (0.42*(R-0.45) + 0.30*(S-0.45))*(1-u)*H;             // jagged silhouette + secondary summits, sharp apex
+  pos.setXYZ(i,V.x,V.y,V.z);
+}
+geo.computeVertexNormals();
+
+/* ---- vertex colours: tan rock ridges, dark crevices, white snow couloirs ---- */
+const nrm=geo.attributes.normal, col=[];
+const rockTan=[0.72,0.55,0.37], rockMid=[0.50,0.34,0.22], rockDark=[0.24,0.14,0.10], snow=[0.95,0.94,0.92];
 function ss(e0,e1,x){x=Math.max(0,Math.min(1,(x-e0)/(e1-e0)));return x*x*(3-2*x);}
 function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
-const H=1.6,RB=1.3, geo=new THREE.ConeGeometry(RB,H,300,240,false), pv=new THREE.Vector3();
-const pos=geo.attributes.position;
-for(let i=0;i<pos.count;i++){pv.fromBufferAttribute(pos,i);const y=pv.y,u=Math.max(0,Math.min(1,(y+H/2)/H));const r=Math.hypot(pv.x,pv.z),th=Math.atan2(pv.z,pv.x),nx=Math.cos(th),nz=Math.sin(th);const gull=ridged(nx*2.4,u*3.2,nz*2.4),crag=fbm(nx*3.4+7,u*4.0,nz*3.4+3);let disp=(0.40*(gull-0.45)+0.34*(crag-0.5))*(0.35+0.80*(1-u));let nr=r*(1+disp);nr+=r*0.05*Math.sin(u*28.0+gull*4.0);const s=r>1e-5?nr/r:0;pv.x*=s;pv.z*=s;pv.y=y+(0.20*(gull-0.5)+0.12*(crag-0.5))*(1-u)*H;pos.setXYZ(i,pv.x,pv.y,pv.z);}
-geo.computeVertexNormals();
-const nrm=geo.attributes.normal,col=[],rockTan=[0.72,0.55,0.37],rockMid=[0.50,0.34,0.22],rockDark=[0.26,0.15,0.11],snow=[0.95,0.94,0.92];
-for(let i=0;i<pos.count;i++){pv.fromBufferAttribute(pos,i);const u=Math.max(0,Math.min(1,(pv.y+H/2)/H));const th=Math.atan2(pv.z,pv.x),nx=Math.cos(th),nz=Math.sin(th),up=Math.max(0,nrm.getY(i));const gull=ridged(nx*2.4,u*3.2,nz*2.4),crag=fbm(nx*3.4+7,u*4.0,nz*3.4+3);let c=mix(rockDark,rockTan,ss(0.15,0.75,crag*0.7+u*0.35));c=mix(c,rockMid,ss(0.55,0.15,gull)*0.4);let sn=ss(0.28,0.80,u)*ss(0.45,0.92,1-gull)*(0.35+0.65*up);sn=Math.max(sn,ss(0.88,1.0,u)*0.85);sn*=(0.55+0.45*ss(0.35,0.7,crag));c=mix(c,snow,sn);col.push(c[0],c[1],c[2]);}
-geo.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
-const peak=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true}));
-tScene.add(peak);
+for(let i=0;i<pos.count;i++){
+  V.fromBufferAttribute(pos,i);
+  const u=Math.max(0,Math.min(1,(V.y+H/2)/H));
+  const th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th), up=Math.max(0,nrm.getY(i));
+  const R=relief(nx,nz,u);
+  let c=mix(rockDark, rockTan, ss(0.2,0.72, R));           // ridges lighter, crevices dark
+  c=mix(c, rockMid, ss(0.5,0.15, R)*0.35);
+  let sn = ss(0.30,0.82,u) * ss(0.55,0.12, R) * (0.3+0.7*up); // snow in couloirs (low relief), up-facing, high
+  sn = Math.max(sn, ss(0.9,1.0,u)*0.85);                    // summit cap
+  sn *= (0.55+0.45*ss(0.35,0.7, fbm(nx*4+2,u*5,nz*4)));     // patchy streaks
+  c=mix(c, snow, sn);
+  col.push(c[0],c[1],c[2]);
+}
+geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
+const peak=new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true}));
+peak.rotation.y=CONFIG.spin0; tScene.add(peak);
 
-/* ============ dot-grid shader on the visible canvas (transparent out) ============ */
+/* ===================== dot-grid shader (transparent output) ===================== */
 const out=document.getElementById('out');
 const gl=out.getContext('webgl',{premultipliedAlpha:true,alpha:true,antialias:false});
 gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
@@ -59,35 +107,25 @@ const loc=gl.getAttribLocation(prog,'aPos');gl.enableVertexAttribArray(loc);gl.v
 const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-const U=n=>gl.getUniformLocation(prog,n);
-let RW=0,RH=0;
+const U=n=>gl.getUniformLocation(prog,n); let RW=0,RH=0;
 function resize(){const dpr=Math.min(devicePixelRatio||1,2);const w=Math.max(2,Math.round(out.clientWidth*dpr)),h=Math.max(2,Math.round(out.clientHeight*dpr));if(w===RW&&h===RH)return;RW=w;RH=h;out.width=w;out.height=h;src.width=w;src.height=h;three.setSize(w,h,false);tCam.aspect=w/h;tCam.updateProjectionMatrix();}
-
 let running=true;
-function frame(){
-  if(!running){requestAnimationFrame(frame);return;}
-  resize();
-  peak.rotation.y+=0.0016;              // slow continuous spin (infinite, seamless)
-  three.render(tScene,tCam);
+function frame(){ if(!running){requestAnimationFrame(frame);return;} resize();
+  peak.rotation.y+=CONFIG.rot; three.render(tScene,tCam);
   gl.viewport(0,0,RW,RH); gl.useProgram(prog);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src);
   const ds=RW/P.refW;
-  gl.uniform1i(U('uSrc'),0); gl.uniform2f(U('uRes'),RW,RH);
-  gl.uniform1f(U('uCell'),Math.max(2,P.spacing)*ds);
-  gl.uniform1f(U('uMinSize'),P.minSize*ds); gl.uniform1f(U('uMaxSize'),P.maxSize*ds);
-  gl.uniform1f(U('uDotOpacity'),P.dotOpacity); gl.uniform3f(U('uDotColor'),P.dotColor[0],P.dotColor[1],P.dotColor[2]);
+  gl.uniform1i(U('uSrc'),0); gl.uniform2f(U('uRes'),RW,RH); gl.uniform1f(U('uCell'),Math.max(2,P.spacing)*ds);
+  gl.uniform1f(U('uMinSize'),P.minSize*ds); gl.uniform1f(U('uMaxSize'),P.maxSize*ds); gl.uniform1f(U('uDotOpacity'),P.dotOpacity);
+  gl.uniform3f(U('uDotColor'),P.dotColor[0],P.dotColor[1],P.dotColor[2]);
   gl.uniform1f(U('uBrightness'),P.brightness); gl.uniform1f(U('uContrast'),P.contrast); gl.uniform1f(U('uGamma'),Math.max(0.01,P.gamma));
   gl.uniform1f(U('uInvert'),P.invert); gl.uniform1f(U('uThreshold'),P.threshold); gl.uniform1f(U('uSoftness'),P.softness);
   gl.uniform1f(U('uCutoff'),P.cutoff); gl.uniform1f(U('uCutoffSoft'),P.cutoffSoft); gl.uniform1f(U('uInvertMask'),P.invertMask);
   gl.uniform1f(U('uShaderOpacity'),P.shaderOpacity); gl.uniform1f(U('uChroma'),P.chroma);
-  gl.uniform3f(U('uChromaColor'),P.chromaColor[0],P.chromaColor[1],P.chromaColor[2]);
-  gl.uniform1f(U('uChromaThresh'),P.chromaThresh); gl.uniform1f(U('uChromaSoft'),P.chromaSoft);
-  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.uniform3f(U('uChromaColor'),P.chromaColor[0],P.chromaColor[1],P.chromaColor[2]); gl.uniform1f(U('uChromaThresh'),P.chromaThresh); gl.uniform1f(U('uChromaSoft'),P.chromaSoft);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES,0,3);
   requestAnimationFrame(frame);
 }
-// perf: pause when off-screen; honor reduced-motion (still renders one frame, just no spin)
 if('IntersectionObserver' in window){ new IntersectionObserver(es=>{running=es[0].isIntersecting;}).observe(out); }
 resize(); requestAnimationFrame(frame);
 </script></body></html>
