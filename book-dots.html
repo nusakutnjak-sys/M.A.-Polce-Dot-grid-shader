@@ -1,0 +1,174 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Dot Book</title>
+<style>html,body{margin:0;height:100%;background:transparent}#out{position:fixed;inset:0;width:100%;height:100%;display:block}</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+</head><body>
+<canvas id="out"></canvas>
+<script>
+/* ===================== POSITION / MOTION CONFIG =====================
+   Edit here, OR override in the iframe URL, e.g.
+   book-dots.html?camZ=4.2&camY=2.2&tgtY=0.4&rot=0.001&spin0=0.3&seed=3
+   camZ = zoom (bigger = further/smaller)   camY = camera height (how much you look down on the book)
+   tgtX/tgtY = look-at (nudge left-right / up-down)   fov = lens
+   rot = spin speed per frame (0 = still)   spin0 = starting angle (rad)   sway = gentle turn back and forth (rad, 0 = off)
+   seed = which page layout variation   posX/posY = move the book in frame   size = scale (1.0)
+   flut = page flutter amount (1 = default, 0 = frozen)
+   snow = share of the pages that gets dots (0.58; lower = sparser)   cut = dot brightness cutoff (0.55)
+   dc = dot colour hex, e.g. dc=ffffff                                 */
+const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+// opened directly (not in an iframe) -> show the preset gradient so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
+let framed=true; try{ framed=window.self!==window.top; }catch(e){}
+if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='linear-gradient(173deg,#0a0f2c 0%,#0243ac 45%,#f0f1f3 90%) fixed';
+const CONFIG={ camX:num('camX',0), camY:num('camY',1.75), camZ:num('camZ',4.3),
+  tgtX:num('tgtX',0), tgtY:num('tgtY',0.95), fov:num('fov',32),
+  posX:num('posX',0), posY:num('posY',0),              // move the book in-frame (posY down = toward bottom)
+  rot:num('rot',0), spin0:num('spin0',0.18), sway:num('sway',0.32), seed:num('seed',1),
+  size:num('size',1.0), flut:num('flut',1) };           // overall book scale (anchored at the spine)
+
+/* ===================== baked dot-style params (your preset) ===================== */
+const P={ spacing:10, minSize:2.6, maxSize:5.2, dotOpacity:0.62, threshold:0, softness:1,
+  brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
+  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
+const KEYGREEN=0x00ff00;
+
+/* ===================== Three.js book -> hidden source canvas (on green) ===================== */
+const src=document.createElement('canvas');
+const three=new THREE.WebGLRenderer({canvas:src,antialias:true}); three.setPixelRatio(1); three.outputEncoding=THREE.sRGBEncoding;
+three.shadowMap.enabled=true; three.shadowMap.type=THREE.PCFSoftShadowMap;   // self-shadowing = dark gaps between the pages
+const tScene=new THREE.Scene(); tScene.background=new THREE.Color(KEYGREEN);
+const tCam=new THREE.PerspectiveCamera(CONFIG.fov,1,0.1,100); tCam.position.set(CONFIG.camX,CONFIG.camY,CONFIG.camZ); tCam.lookAt(CONFIG.tgtX,CONFIG.tgtY,0);
+tScene.add(new THREE.HemisphereLight(0xdfe8ff,0x2a1e16,0.30));                // lower fill -> deeper shadows
+const key=new THREE.DirectionalLight(0xfff1df,1.45); key.position.set(-3.5,5.5,5); key.castShadow=true;
+key.shadow.mapSize.set(2048,2048); key.shadow.camera.near=0.5; key.shadow.camera.far=22;
+key.shadow.camera.left=-2.6;key.shadow.camera.right=2.6;key.shadow.camera.top=2.6;key.shadow.camera.bottom=-2.6;
+key.shadow.bias=-0.0006; tScene.add(key);
+const rim=new THREE.DirectionalLight(0xbcd2ff,0.28); rim.position.set(4,1.5,-4); tScene.add(rim);
+
+/* ---- noise: value noise + fBm + ridged multifractal ---- */
+const SEED=CONFIG.seed*97.13;
+function fract(x){return x-Math.floor(x);} function hash3(i,j,k){return fract(Math.sin((i+SEED)*127.1+(j)*311.7+(k)*74.7)*43758.5453);} function smt(t){return t*t*(3-2*t);}
+function vnoise(x,y,z){const ix=Math.floor(x),iy=Math.floor(y),iz=Math.floor(z),fx=x-ix,fy=y-iy,fz=z-iz;const u=smt(fx),v=smt(fy),w=smt(fz);const L=(a,b,t)=>a+(b-a)*t,C=(dx,dy,dz)=>hash3(ix+dx,iy+dy,iz+dz);const x00=L(C(0,0,0),C(1,0,0),u),x10=L(C(0,1,0),C(1,1,0),u),x01=L(C(0,0,1),C(1,0,1),u),x11=L(C(0,1,1),C(1,1,1),u);return L(L(x00,x10,v),L(x01,x11,v),w);}
+function fbm(x,y,z){let a=0,amp=0.5,f=1;for(let o=0;o<5;o++){a+=amp*vnoise(x*f,y*f,z*f);f*=2.03;amp*=0.5;}return a;}
+function snoise(x,y,z){return vnoise(x,y,z)*2-1;}
+function ridgedMF(x,y,z){ let sum=0,f=1,w=0.55,prev=1; for(let o=0;o<6;o++){ let n=1-Math.abs(snoise(x*f,y*f,z*f)); n=n*n; sum+=n*w*prev; prev=Math.min(1,n*2.2); f*=2.07; w*=0.5; } return sum; } // 0..~1, sharp ridges
+const rnd=(k,c)=>hash3(k*13.7+c*3.1, c*7.3, k*1.9+0.5);   // stable per-page random 0..1
+function ss(e0,e1,x){x=Math.max(0,Math.min(1,(x-e0)/(e1-e0)));return x*x*(3-2*x);}
+function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
+
+/* ---- build the book ----
+   Spine runs along z (pointing at the camera, like the reference); pages are bent sheets rooted in the gutter.
+   th = page angle from vertical (- = left, + = right). Each page's centreline leaves the gutter steeply, eases
+   toward th, then sags under its own weight; a per-page twist + bow along z keeps the fore-edges from being
+   straight/parallel, so the silhouette stays ragged from every angle. The right fan is fuller than the left. */
+const LP=1.0, DP=1.42, NS=30, NZ=18;           // page length (gutter -> fore-edge), page height along the spine, grid
+const PAGES=[];
+function addPages(n,a0,a1,amp,kind){ for(let i=0;i<n;i++){ const k=PAGES.length, t=n>1?i/(n-1):0.5;
+  PAGES.push({ th:a0+(a1-a0)*t+(rnd(k,1)-0.5)*Math.abs(a1-a0)/Math.max(1,n)*0.9, amp:amp*(0.6+0.8*rnd(k,2)),
+    w:0.55+0.9*rnd(k,3), ph:6.283*rnd(k,4), tw:(rnd(k,5)-0.5)*0.40, bow:(rnd(k,6)-0.5)*0.12, droop:kind===0?-0.10-0.25*rnd(k,7):0.45+0.75*rnd(k,7),
+    len:LP*(0.985+0.03*rnd(k,8)), zo:(rnd(k,9)-0.5)*0.035, kind, n:i }); } }
+addPages(10,-1.52,-1.24,0.006,0);   // left block, lying (nearly) flat, tips curling up
+addPages(8,-1.12,-0.42,0.045,1);    // left fan
+addPages(3,-0.26, 0.10,0.11,2);     // loose, near-upright middle pages (flutter most)
+addPages(13, 0.20, 1.10,0.05,1);    // right fan (fuller, like the reference)
+addPages(10, 1.24, 1.52,0.006,0);   // right block
+const NP=PAGES.length, VPP=(NS+1)*(NZ+1);
+const geo=new THREE.BufferGeometry(), posA=new Float32Array(NP*VPP*3), idx=[];
+for(let p=0;p<NP;p++){ const b=p*VPP; for(let i=0;i<NS;i++) for(let j=0;j<NZ;j++){ const a=b+i*(NZ+1)+j, c=a+NZ+1; idx.push(a,c,a+1, c,c+1,a+1); } }
+geo.setIndex(idx); geo.setAttribute('position', new THREE.BufferAttribute(posA,3));
+function buildPages(t){
+  for(let p=0;p<NP;p++){ const g=PAGES[p], th=g.th+CONFIG.flut*g.amp*(Math.sin(g.w*t+g.ph)+0.35*Math.sin(2.3*g.w*t+1.7*g.ph)),
+      sg=Math.sign(th)||1, at=Math.abs(th), b=p*VPP,
+      rx=0.045*Math.sin(th), ry=0.045*(1-Math.cos(th))+(g.kind===0?0.007*(9-g.n):0);   // roots on the rounded gutter; flat blocks stack up
+    const tw=g.tw*(1+CONFIG.flut*0.4*Math.sin(0.7*g.w*t+g.ph));                          // twist: top vs bottom corner differ
+    for(let j=0;j<=NZ;j++){ const v=j/NZ, z=(v-0.5)*DP+g.zo, zc=2*v-1;
+      let x=rx, y=ry; const ds=g.len/NS;
+      for(let i=0;i<=NS;i++){ const s=i/NS;
+        // direction from vertical: rises out of the gutter, eases to th, then sags (more for fanned pages)
+        let ph=th*(1-Math.exp(-s/0.16)) + sg*g.droop*(g.kind===0?1:Math.sin(at)+0.35)*s*s + tw*zc*s;
+        ph=Math.max(-1.66,Math.min(1.66,ph));
+        const o=(b+i*(NZ+1)+j)*3, bw=g.bow*(1-zc*zc)*s*s;                                   // bow along the page height
+        posA[o]=x+bw*Math.cos(ph); posA[o+1]=y-bw*Math.sin(ph); posA[o+2]=z;
+        x+=Math.sin(ph)*ds; y+=Math.cos(ph)*ds; } } }
+  geo.attributes.position.needsUpdate=true; }
+buildPages(0); geo.computeVertexNormals();
+
+/* ---- vertex colours: dark paper (gaps) vs bright paper (dots), mottled across every page ---- */
+const nrm=geo.attributes.normal, V=new THREE.Vector3(), col=new Float32Array(NP*VPP*3);
+// "snow" field per vertex; threshold picked by quantile so the bright paper covers a fixed share (URL ?snow=0.58)
+const SF=new Float32Array(NP*VPP), sfv=[];
+for(let p=0;p<NP;p++) for(let i=0;i<=NS;i++) for(let j=0;j<=NZ;j++){ const n=p*VPP+i*(NZ+1)+j, s=i/NS; V.fromBufferAttribute(geo.attributes.position,n);
+  const R=ridgedMF(V.x*1.6+p*0.21, V.y*1.6, V.z*1.6), up=Math.abs(nrm.getY(n));   // double-sided sheets: either face can be "up"
+  const F=fbm(V.x*7.0+2+p*0.37, V.y*6.0, V.z*7.0+9), G=fbm(V.x*15.0+5, V.y*13.0+p*0.53, V.z*15.0+1);
+  SF[n]=0.22*(1-R) + 0.36*F + 0.32*G + 0.10*up + 0.08*(rnd(p,11)-0.5)    // per-page offset -> neighbouring pages read apart
+       - 0.35*(1-ss(0.02,0.16,s));                                         // dark gutter crease
+  sfv.push(SF[n]); }
+sfv.sort((a,b)=>a-b); const SNOW_LO=sfv[Math.floor(sfv.length*(1-num('snow',0.58)))]-0.03;
+const paperTan=[0.14,0.10,0.065], paperMid=[0.05,0.035,0.024], paperDark=[0.008,0.006,0.005], white=[0.98,0.97,0.95]; // linear: dark paper = gaps, white = dots
+for(let p=0;p<NP;p++) for(let i=0;i<=NS;i++) for(let j=0;j<=NZ;j++){ const n=p*VPP+i*(NZ+1)+j;
+  V.fromBufferAttribute(geo.attributes.position,n);
+  const R=fbm(V.x*4.0+11, V.y*4.0+p*0.3, V.z*4.0+5);
+  let c=mix(paperDark, paperTan, ss(0.3,0.7,R));
+  c=mix(c, paperMid, ss(0.55,0.3,R)*0.35);
+  c=mix(c, white, ss(SNOW_LO, SNOW_LO+0.06, SF[n]));
+  col[n*3]=c[0]; col[n*3+1]=c[1]; col[n*3+2]=c[2]; }
+geo.setAttribute('color', new THREE.BufferAttribute(col,3));
+const book=new THREE.Group();
+const pages=new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true,side:THREE.DoubleSide}));
+pages.castShadow=true; pages.receiveShadow=true;   // pages shadow each other -> dark layered gaps
+book.add(pages);
+// spine + boards: pure black -> below the cutoff -> no dots (they only cast/receive shadow)
+const blackM=new THREE.MeshStandardMaterial({color:0x000000,roughness:1,metalness:0});
+const spine=new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.075,DP+0.06,20,1,false,Math.PI*0.5,Math.PI), blackM);
+spine.rotation.x=Math.PI/2; spine.position.set(0,0.03,0); book.add(spine);
+for(const sgn of [-1,1]){ const bd=new THREE.Mesh(new THREE.BoxGeometry(LP+0.06,0.03,DP+0.06), blackM);
+  bd.position.set(sgn*(LP/2+0.07),-0.02,0); bd.rotation.z=-sgn*0.03; bd.castShadow=true; bd.receiveShadow=true; book.add(bd); }
+book.position.set(CONFIG.posX,CONFIG.posY,0); book.scale.setScalar(CONFIG.size); book.rotation.y=CONFIG.spin0; tScene.add(book);
+let spinAcc=0; const T0=performance.now();
+function animate(){ const t=(performance.now()-T0)/1000; spinAcc+=CONFIG.rot;
+  book.rotation.y=CONFIG.spin0+spinAcc+CONFIG.sway*Math.sin(t*0.22);
+  if(CONFIG.flut>0) buildPages(t); }
+
+/* ===================== dot-grid shader (transparent output) ===================== */
+const out=document.getElementById('out');
+const gl=out.getContext('webgl',{premultipliedAlpha:true,alpha:true,antialias:false});
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+const VS='attribute vec2 aPos;varying vec2 vUv;void main(){vUv=aPos*0.5+0.5;gl_Position=vec4(aPos,0.,1.);}';
+const FS=['precision highp float;varying vec2 vUv;uniform sampler2D uSrc;uniform vec2 uRes;uniform float uCell;',
+'uniform float uMinSize,uMaxSize,uDotOpacity;uniform vec3 uDotColor;uniform float uBrightness,uContrast,uGamma,uInvert,uThreshold,uSoftness;',
+'uniform float uCutoff,uCutoffSoft,uInvertMask,uShaderOpacity,uChroma,uChromaThresh,uChromaSoft;uniform vec3 uChromaColor;',
+'float luma(vec3 c){return dot(c,vec3(0.299,0.587,0.114));}',
+'void main(){vec2 fp=vUv*uRes;vec2 cell=floor(fp/uCell);vec2 ctr=(cell+0.5)*uCell;vec3 rgb=texture2D(uSrc,ctr/uRes).rgb;float rawL=luma(rgb);',
+'float mask=smoothstep(uCutoff,uCutoff+max(uCutoffSoft,0.001),rawL);if(uInvertMask>0.5)mask=1.0-mask;',
+'if(uChroma>0.5){float ky=luma(uChromaColor);vec2 kc=vec2(uChromaColor.b-ky,uChromaColor.r-ky);float py=luma(rgb);vec2 pc=vec2(rgb.b-py,rgb.r-py);mask*=smoothstep(uChromaThresh,uChromaThresh+max(uChromaSoft,0.001),distance(pc,kc));}',
+'float L=rawL;L+=uBrightness;L=(L-0.5)*uContrast+0.5;L=clamp(L,0.,1.);L=pow(L,1.0/uGamma);if(uInvert>0.5)L=1.0-L;',
+'float dv=smoothstep(uThreshold,uThreshold+max(uSoftness,0.001),L);',
+'float hc=uCell*0.5;float rad=min(mix(uMinSize,uMaxSize,dv)*0.5,hc);float d=distance(fp,ctr);float cov=1.0-smoothstep(rad-1.0,rad+1.0,d);',
+'float a=cov*uDotOpacity*mask*uShaderOpacity;gl_FragColor=vec4(uDotColor*a,a);}'].join('\n');
+function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(x));return x;}
+const prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(prog);gl.useProgram(prog);
+const quad=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const loc=gl.getAttribLocation(prog,'aPos');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+const U=n=>gl.getUniformLocation(prog,n); let RW=0,RH=0;
+function resize(){const dpr=Math.min(devicePixelRatio||1,2);const w=Math.max(2,Math.round(out.clientWidth*dpr)),h=Math.max(2,Math.round(out.clientHeight*dpr));if(w===RW&&h===RH)return;RW=w;RH=h;out.width=w;out.height=h;src.width=w;src.height=h;three.setSize(w,h,false);tCam.aspect=w/h;tCam.updateProjectionMatrix();}
+let running=true;
+function frame(){ if(!running){requestAnimationFrame(frame);return;} resize();
+  animate(); three.render(tScene,tCam);
+  gl.viewport(0,0,RW,RH); gl.useProgram(prog);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src);
+  const ds=RH/P.refH;   // dots scale with height, like the camera (vertical FOV) -> same dot density on the book at any aspect
+  gl.uniform1i(U('uSrc'),0); gl.uniform2f(U('uRes'),RW,RH); gl.uniform1f(U('uCell'),Math.max(2,P.spacing)*ds);
+  gl.uniform1f(U('uMinSize'),P.minSize*ds); gl.uniform1f(U('uMaxSize'),P.maxSize*ds); gl.uniform1f(U('uDotOpacity'),P.dotOpacity);
+  gl.uniform3f(U('uDotColor'),P.dotColor[0],P.dotColor[1],P.dotColor[2]);
+  gl.uniform1f(U('uBrightness'),P.brightness); gl.uniform1f(U('uContrast'),P.contrast); gl.uniform1f(U('uGamma'),Math.max(0.01,P.gamma));
+  gl.uniform1f(U('uInvert'),P.invert); gl.uniform1f(U('uThreshold'),P.threshold); gl.uniform1f(U('uSoftness'),P.softness);
+  gl.uniform1f(U('uCutoff'),P.cutoff); gl.uniform1f(U('uCutoffSoft'),P.cutoffSoft); gl.uniform1f(U('uInvertMask'),P.invertMask);
+  gl.uniform1f(U('uShaderOpacity'),P.shaderOpacity); gl.uniform1f(U('uChroma'),P.chroma);
+  gl.uniform3f(U('uChromaColor'),P.chromaColor[0],P.chromaColor[1],P.chromaColor[2]); gl.uniform1f(U('uChromaThresh'),P.chromaThresh); gl.uniform1f(U('uChromaSoft'),P.chromaSoft);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES,0,3);
+  requestAnimationFrame(frame);
+}
+if('IntersectionObserver' in window){ new IntersectionObserver(es=>{running=es[0].isIntersecting;}).observe(out); }
+resize(); requestAnimationFrame(frame);
+</script></body></html>
