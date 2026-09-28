@@ -21,7 +21,7 @@ if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.sty
 const CONFIG={ camX:num('camX',0), camY:num('camY',1.75), camZ:num('camZ',4.3),
   tgtX:num('tgtX',0), tgtY:num('tgtY',0.95), fov:num('fov',32),
   posX:num('posX',0), posY:num('posY',0),              // move the book in-frame (posY down = toward bottom)
-  rot:num('rot',0), spin0:num('spin0',0.18), sway:num('sway',0.32), seed:num('seed',1),
+  rot:num('rot',0), spin0:num('spin0',0), sway:num('sway',0), seed:num('seed',1),
   size:num('size',1.0), flut:num('flut',1) };           // overall book scale (anchored at the spine)
 
 /* ===================== baked dot-style params (your preset) ===================== */
@@ -66,8 +66,8 @@ function addPages(n,a0,a1,amp,kind){ for(let i=0;i<n;i++){ const k=PAGES.length,
     w:0.55+0.9*rnd(k,3), ph:6.283*rnd(k,4), tw:(rnd(k,5)-0.5)*0.40, bow:(rnd(k,6)-0.5)*0.12, droop:kind===0?-0.10-0.25*rnd(k,7):0.45+0.75*rnd(k,7),
     len:LP*(0.985+0.03*rnd(k,8)), zo:(rnd(k,9)-0.5)*0.035, kind, n:i }); } }
 addPages(10,-1.52,-1.24,0.006,0);   // left block, lying (nearly) flat, tips curling up
-addPages(8,-1.12,-0.42,0.045,1);    // left fan
-addPages(3,-0.26, 0.10,0.11,2);     // loose, near-upright middle pages (flutter most)
+addPages(8,-1.26,-0.80,0.045,1);    // left fan (lower than the right, like the reference)
+addPages(3,-0.02, 0.16,0.08,2);     // loose, near-upright middle pages leaning right (flutter most)
 addPages(13, 0.20, 1.10,0.05,1);    // right fan (fuller, like the reference)
 addPages(10, 1.24, 1.52,0.006,0);   // right block
 const NP=PAGES.length, VPP=(NS+1)*(NZ+1);
@@ -83,7 +83,7 @@ function buildPages(t){
       let x=rx, y=ry; const ds=g.len/NS;
       for(let i=0;i<=NS;i++){ const s=i/NS;
         // direction from vertical: rises out of the gutter, eases to th, then sags (more for fanned pages)
-        let ph=th*(1-Math.exp(-s/0.16)) + sg*g.droop*(g.kind===0?1:Math.sin(at)+0.35)*s*s + tw*zc*s;
+        let ph=th*(1-Math.exp(-s/0.16)) + sg*g.droop*(g.kind===0?1:g.kind===2?0.25:Math.sin(at)+0.35)*s*s + tw*zc*s;
         ph=Math.max(-1.66,Math.min(1.66,ph));
         const o=(b+i*(NZ+1)+j)*3, bw=g.bow*(1-zc*zc)*s*s;                                   // bow along the page height
         posA[o]=x+bw*Math.cos(ph); posA[o+1]=y-bw*Math.sin(ph); posA[o+2]=z;
