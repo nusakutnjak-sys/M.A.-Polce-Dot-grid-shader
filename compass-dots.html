@@ -1,0 +1,137 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Dot Compass</title>
+<style>html,body{margin:0;height:100%;background:transparent}#out{position:fixed;inset:0;width:100%;height:100%;display:block}</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+</head><body>
+<canvas id="out"></canvas>
+<script>
+/* ===================== POSITION / MOTION CONFIG =====================
+   Edit here, OR override in the iframe URL, e.g.
+   compass-dots.html?objx=0.8&objy=0.28&size=1.1&swing=0.25
+   Framing copies the current footer video: a 1280x720 stage with the compass at (cx, cy) of the stage, fitted into the
+   iframe with CSS "cover" + object-position objx/objy (80% 28%, same as .footer_cta_video), so it lands in the same
+   place at any footer size.
+   cx/cy = compass centre on the stage (0.695 / 0.43)   r = bezel radius as a share of stage height (0.285)
+   objx/objy = object-position (0.8 / 0.28)   size = extra scale (1.0)   posX/posY = nudge in frame units
+   swing = needle swing (rad, 0.2; 0 = still)   sway = gentle wobble of the whole compass (rad, 0.03)
+   seed = texture variation   cut = dot brightness cutoff (0.55)   grad = 1 paints the old video's gradient inside the iframe
+   dot = dot size (0.72 = same as the other pages)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)  */
+const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+// the gradient baked into the old footer video (sampled from compass-footer-v3.mp4): light grey -> blue -> navy
+const GRAD='linear-gradient(#ecf1f2 0%,#d0e1ef 6%,#b0cfec 12%,#87b9e9 20%,#539de5 30%,#2182e2 40%,#0769c9 50%,#0953a4 60%,#093c7b 70%,#0a2754 80%,#0b0f2c 90%,#0b0f2c 100%)';
+// opened directly (not in an iframe) -> show that gradient so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force; ?grad=1 paints it inside the iframe)
+let framed=true; try{ framed=window.self!==window.top; }catch(e){}
+if(Q.get('bg')==='1'||Q.get('grad')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background=GRAD;
+const CONFIG={ camX:0, camY:0, camZ:3.49, tgtX:0, tgtY:0, fov:32,           // camZ 3.49 + fov 32 -> the frame is ~2 units tall
+  cx:num('cx',0.695), cy:num('cy',0.43), r:num('r',0.285), objx:num('objx',0.8), objy:num('objy',0.28),
+  posX:num('posX',0), posY:num('posY',0), size:num('size',1.0),
+  swing:num('swing',0.2), sway:num('sway',0.03), spin0:0, seed:num('seed',1) };
+
+/* ===================== baked dot-style params (your preset) ===================== */
+const DOT=num('dot',0.72);   // dot size + grid spacing scale (1 = the original mountain preset; 0.72 = same as the other pages)
+const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.62), threshold:0, softness:1,
+  brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
+  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
+const KEYGREEN=0x00ff00;
+
+/* ===================== Three.js compass -> hidden source canvas (on green) ===================== */
+const src=document.createElement('canvas');
+const three=new THREE.WebGLRenderer({canvas:src,antialias:true}); three.setPixelRatio(1); three.outputEncoding=THREE.sRGBEncoding;
+three.shadowMap.enabled=true; three.shadowMap.type=THREE.PCFSoftShadowMap;   // soft self-shadowing
+const tScene=new THREE.Scene(); tScene.background=new THREE.Color(KEYGREEN);
+const tCam=new THREE.PerspectiveCamera(CONFIG.fov,1,0.1,100); tCam.position.set(CONFIG.camX,CONFIG.camY,CONFIG.camZ); tCam.lookAt(CONFIG.tgtX,CONFIG.tgtY,0);
+tScene.add(new THREE.HemisphereLight(0xdfe8ff,0x2a1e16,0.30));                // lower fill -> deeper shadows
+const key=new THREE.DirectionalLight(0xfff1df,1.45); key.position.set(-3.5,5.5,5); key.castShadow=true;
+key.shadow.mapSize.set(2048,2048); key.shadow.camera.near=0.5; key.shadow.camera.far=22;
+key.shadow.camera.left=-2.6;key.shadow.camera.right=2.6;key.shadow.camera.top=2.6;key.shadow.camera.bottom=-2.6;
+key.shadow.bias=-0.0006; tScene.add(key);
+const rim=new THREE.DirectionalLight(0xbcd2ff,0.28); rim.position.set(4,1.5,-4); tScene.add(rim);
+
+/* ---- noise: value noise + fBm + ridged multifractal ---- */
+const SEED=CONFIG.seed*97.13;
+function fract(x){return x-Math.floor(x);} function hash3(i,j,k){return fract(Math.sin((i+SEED)*127.1+(j)*311.7+(k)*74.7)*43758.5453);} function smt(t){return t*t*(3-2*t);}
+function vnoise(x,y,z){const ix=Math.floor(x),iy=Math.floor(y),iz=Math.floor(z),fx=x-ix,fy=y-iy,fz=z-iz;const u=smt(fx),v=smt(fy),w=smt(fz);const L=(a,b,t)=>a+(b-a)*t,C=(dx,dy,dz)=>hash3(ix+dx,iy+dy,iz+dz);const x00=L(C(0,0,0),C(1,0,0),u),x10=L(C(0,1,0),C(1,1,0),u),x01=L(C(0,0,1),C(1,0,1),u),x11=L(C(0,1,1),C(1,1,1),u);return L(L(x00,x10,v),L(x01,x11,v),w);}
+function fbm(x,y,z){let a=0,amp=0.5,f=1;for(let o=0;o<5;o++){a+=amp*vnoise(x*f,y*f,z*f);f*=2.03;amp*=0.5;}return a;}
+function snoise(x,y,z){return vnoise(x,y,z)*2-1;}
+function ridgedMF(x,y,z){ let sum=0,f=1,w=0.55,prev=1; for(let o=0;o<6;o++){ let n=1-Math.abs(snoise(x*f,y*f,z*f)); n=n*n; sum+=n*w*prev; prev=Math.min(1,n*2.2); f*=2.07; w*=0.5; } return sum; } // 0..~1, sharp ridges
+function ss(e0,e1,x){x=Math.max(0,Math.min(1,(x-e0)/(e1-e0)));return x*x*(3-2*x);}
+function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
+
+
+/* ---- build the pocket compass, face-on like the reference (units: bezel outer radius ~1.04) ----
+   Bright (dots): bail ring, thick bezel, case, dial. Dark (gaps): the recessed ring between bezel and dial, the needle
+   and the compass-rose arms, so they read as the dark lines in the tile. The needle swings back and forth. */
+const compass=new THREE.Group(), parts=[];
+const add=(g,a,grp)=>{ const col=new Float32Array(g.attributes.position.count*3).fill(a); g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; (grp||compass).add(m); return m; };
+const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.7,metalness:0,flatShading:true});
+const BRIGHT=0.95, DIAL=0.9, DARK=0.03, ROSE=0.30;
+add(new THREE.TorusGeometry(0.92,0.12,24,120),BRIGHT);                                              // bezel
+{ const g=new THREE.CylinderGeometry(0.95,0.95,0.16,96,1); g.rotateX(Math.PI/2); g.translate(0,0,-0.10); add(g,BRIGHT*0.85); }   // case behind
+{ const g=new THREE.RingGeometry(0.74,0.84,96,1); g.translate(0,0,-0.005); add(g,DARK); }            // recessed dark ring
+{ const g=new THREE.CircleGeometry(0.74,96); add(g,DIAL); }                                         // dial face
+for(let k=0;k<8;k++){ const long=k%2===0, L=long?0.62:0.40, w=long?0.05:0.035;                      // compass rose arms (dark thin diamonds)
+  const sh=new THREE.Shape(); sh.moveTo(0,0); sh.lineTo(w,L*0.25); sh.lineTo(0,L); sh.lineTo(-w,L*0.25); sh.lineTo(0,0);
+  const g=new THREE.ShapeGeometry(sh); g.rotateZ(k*Math.PI/4); g.translate(0,0,0.004); add(g,ROSE); }
+for(let k=0;k<48;k++){ const a=k/48*Math.PI*2, big=k%4===0, g=new THREE.PlaneGeometry(big?0.018:0.01, big?0.07:0.04);   // tick marks
+  g.translate(0,0.70-(big?0.035:0.02),0.005); g.rotateZ(a); add(g,DARK); }
+const needleG=new THREE.Group(); needleG.position.z=0.03; compass.add(needleG);
+{ const sh=new THREE.Shape(); sh.moveTo(0,0.62); sh.lineTo(0.075,0); sh.lineTo(0,-0.62); sh.lineTo(-0.075,0); sh.lineTo(0,0.62);
+  const g=new THREE.ExtrudeGeometry(sh,{depth:0.03,bevelEnabled:true,bevelThickness:0.01,bevelSize:0.01,bevelSegments:1}); add(g,DARK,needleG); }
+{ const g=new THREE.CylinderGeometry(0.05,0.05,0.05,24); g.rotateX(Math.PI/2); g.translate(0,0,0.05); add(g,DARK,needleG); }
+{ const g=new THREE.CylinderGeometry(0.07,0.07,0.12,24); g.translate(0,1.10,0); add(g,BRIGHT); }     // crown / neck
+{ const g=new THREE.TorusGeometry(0.16,0.045,16,48); g.translate(0,1.33,0); add(g,BRIGHT); }          // bail ring
+tScene.add(compass);
+// fit exactly like the old video: 1280x720 stage, CSS cover + object-position, compass at (cx,cy) of the stage
+function place(){ const W=out.clientWidth||1, H=out.clientHeight||1, s=Math.max(W/1280,H/720);
+  const ox=(W-1280*s)*CONFIG.objx, oy=(H-720*s)*CONFIG.objy, cx=ox+CONFIG.cx*1280*s, cy=oy+CONFIG.cy*720*s, rp=CONFIG.r*720*s;
+  compass.position.set((cx-W/2)*2/H+CONFIG.posX, 1-2*cy/H+CONFIG.posY, 0); compass.scale.setScalar(rp*2/H/1.04*CONFIG.size); }
+const T0=performance.now();
+function animate(){ const t=(performance.now()-T0)/1000; place();
+  needleG.rotation.z=CONFIG.swing*(Math.sin(t*1.15)*0.75+Math.sin(t*2.9+1.3)*0.25);             // needle swings, never quite settling
+  compass.rotation.y=CONFIG.sway*Math.sin(t*0.5); compass.rotation.x=CONFIG.sway*0.6*Math.sin(t*0.37+1); }
+
+/* ===================== dot-grid shader (transparent output) ===================== */
+const out=document.getElementById('out');
+const gl=out.getContext('webgl',{premultipliedAlpha:true,alpha:true,antialias:false});
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+const VS='attribute vec2 aPos;varying vec2 vUv;void main(){vUv=aPos*0.5+0.5;gl_Position=vec4(aPos,0.,1.);}';
+const FS=['precision highp float;varying vec2 vUv;uniform sampler2D uSrc;uniform vec2 uRes;uniform float uCell;',
+'uniform float uMinSize,uMaxSize,uDotOpacity;uniform vec3 uDotColor;uniform float uBrightness,uContrast,uGamma,uInvert,uThreshold,uSoftness;',
+'uniform float uCutoff,uCutoffSoft,uInvertMask,uShaderOpacity,uChroma,uChromaThresh,uChromaSoft;uniform vec3 uChromaColor;',
+'float luma(vec3 c){return dot(c,vec3(0.299,0.587,0.114));}',
+'void main(){vec2 fp=vUv*uRes;vec2 cell=floor(fp/uCell);vec2 ctr=(cell+0.5)*uCell;vec3 rgb=texture2D(uSrc,ctr/uRes).rgb;float rawL=luma(rgb);',
+'float mask=smoothstep(uCutoff,uCutoff+max(uCutoffSoft,0.001),rawL);if(uInvertMask>0.5)mask=1.0-mask;',
+'if(uChroma>0.5){float ky=luma(uChromaColor);vec2 kc=vec2(uChromaColor.b-ky,uChromaColor.r-ky);float py=luma(rgb);vec2 pc=vec2(rgb.b-py,rgb.r-py);mask*=smoothstep(uChromaThresh,uChromaThresh+max(uChromaSoft,0.001),distance(pc,kc));}',
+'float L=rawL;L+=uBrightness;L=(L-0.5)*uContrast+0.5;L=clamp(L,0.,1.);L=pow(L,1.0/uGamma);if(uInvert>0.5)L=1.0-L;',
+'float dv=smoothstep(uThreshold,uThreshold+max(uSoftness,0.001),L);',
+'float hc=uCell*0.5;float rad=min(mix(uMinSize,uMaxSize,dv)*0.5,hc);float d=distance(fp,ctr);float cov=1.0-smoothstep(rad-1.0,rad+1.0,d);',
+'float a=cov*uDotOpacity*mask*uShaderOpacity;gl_FragColor=vec4(uDotColor*a,a);}'].join('\n');
+function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(x));return x;}
+const prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(prog);gl.useProgram(prog);
+const quad=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const loc=gl.getAttribLocation(prog,'aPos');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+const U=n=>gl.getUniformLocation(prog,n); let RW=0,RH=0;
+function resize(){const dpr=Math.min(devicePixelRatio||1,2);const w=Math.max(2,Math.round(out.clientWidth*dpr)),h=Math.max(2,Math.round(out.clientHeight*dpr));if(w===RW&&h===RH)return;RW=w;RH=h;out.width=w;out.height=h;src.width=w;src.height=h;three.setSize(w,h,false);tCam.aspect=w/h;tCam.updateProjectionMatrix();}
+let running=true;
+function frame(){ if(!running){requestAnimationFrame(frame);return;} resize();
+  animate(); three.render(tScene,tCam);
+  gl.viewport(0,0,RW,RH); gl.useProgram(prog);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src);
+  const ds=RH/P.refH;   // dots scale with height, like the camera (vertical FOV) -> same dot density on the compass at any aspect
+  gl.uniform1i(U('uSrc'),0); gl.uniform2f(U('uRes'),RW,RH); gl.uniform1f(U('uCell'),Math.max(2,P.spacing)*ds);
+  gl.uniform1f(U('uMinSize'),P.minSize*ds); gl.uniform1f(U('uMaxSize'),P.maxSize*ds); gl.uniform1f(U('uDotOpacity'),P.dotOpacity);
+  gl.uniform3f(U('uDotColor'),P.dotColor[0],P.dotColor[1],P.dotColor[2]);
+  gl.uniform1f(U('uBrightness'),P.brightness); gl.uniform1f(U('uContrast'),P.contrast); gl.uniform1f(U('uGamma'),Math.max(0.01,P.gamma));
+  gl.uniform1f(U('uInvert'),P.invert); gl.uniform1f(U('uThreshold'),P.threshold); gl.uniform1f(U('uSoftness'),P.softness);
+  gl.uniform1f(U('uCutoff'),P.cutoff); gl.uniform1f(U('uCutoffSoft'),P.cutoffSoft); gl.uniform1f(U('uInvertMask'),P.invertMask);
+  gl.uniform1f(U('uShaderOpacity'),P.shaderOpacity); gl.uniform1f(U('uChroma'),P.chroma);
+  gl.uniform3f(U('uChromaColor'),P.chromaColor[0],P.chromaColor[1],P.chromaColor[2]); gl.uniform1f(U('uChromaThresh'),P.chromaThresh); gl.uniform1f(U('uChromaSoft'),P.chromaSoft);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES,0,3);
+  requestAnimationFrame(frame);
+}
+if('IntersectionObserver' in window){ new IntersectionObserver(es=>{running=es[0].isIntersecting;}).observe(out); }
+resize(); requestAnimationFrame(frame);
+</script></body></html>
