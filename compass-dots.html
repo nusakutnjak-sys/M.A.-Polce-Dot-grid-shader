@@ -12,7 +12,7 @@
    place at any footer size.
    cx/cy = compass centre on the stage (0.695 / 0.43)   r = bezel radius as a share of stage height (0.285)
    objx/objy = object-position (0.8 / 0.28)   size = extra scale (1.0)   posX/posY = nudge in frame units
-   marks = 0 hides the painted dial markings (letters, ticks, rose)   south = south needle tone (0.33; lower = darker, above ~0.38 it fades into the dial)   metal = bezel/case/bail brightness (0.56)   face = dial brightness (0.52)
+   marks = 0 hides the painted dial markings (ticks, rose)   letters = 1 adds the N/E/S/W letters   south = south needle tone (0.33; lower = darker, above ~0.38 it fades into the dial)   metal = bezel/case/bail brightness (0.56)   face = dial brightness (0.52)
    swing = needle swing (rad, 0.2; 0 = still)   sway = gentle wobble of the whole compass (rad, 0.03)
    seed = texture variation   cut = dot brightness cutoff (0.55)   grad = 1 paints the old video's gradient inside the iframe
    dot = dot size (0.72 = same as the hero pages)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)  */
@@ -75,7 +75,7 @@ const shadeB=(g,a)=>{ const p=g.attributes.position, c=g.attributes.color; for(l
 { const g=new THREE.TorusGeometry(0.92,0.12,24,120); add(g,BRIGHT); shadeB(g,BRIGHT); }            // bezel
 { const g=new THREE.CylinderGeometry(0.95,0.95,0.16,96,1); g.rotateX(Math.PI/2); g.translate(0,0,-0.10); add(g,BRIGHT*0.85); shadeB(g,BRIGHT*0.85); }   // case behind
 { const g=new THREE.RingGeometry(0.76,0.82,96,1); g.translate(0,0,-0.005); add(g,DARK); }            // recessed dark ring
-// dial face with the source's markings painted on (N/E/S/W letters, tick ring, light compass rose). They're drawn in
+// dial face with the source's markings painted on (tick ring + light compass rose; N/E/S/W letters only with ?letters=1). They're drawn in
 // mid greys, so in dots they read as smaller dots / gaps instead of vanishing (?marks=0 turns them off)
 function dialTexture(){ const S=1024, c=document.createElement('canvas'); c.width=c.height=S; const x=c.getContext('2d'), R=S/2;
   x.fillStyle='#fff'; x.fillRect(0,0,S,S); x.translate(R,R);
@@ -85,7 +85,7 @@ function dialTexture(){ const S=1024, c=document.createElement('canvas'); c.widt
   x.strokeStyle=INK; x.lineCap='butt'; for(let k=0;k<72;k++){ const big=k%6===0, r1=R*0.95, r0=R*(big?0.84:0.89);
     x.lineWidth=big?R*0.030:R*0.016; x.save(); x.rotate(k*Math.PI/36); x.beginPath(); x.moveTo(0,-r0); x.lineTo(0,-r1); x.stroke(); x.restore(); }
   x.fillStyle=INK; x.font='600 '+Math.round(R*0.22)+'px Georgia, "Times New Roman", serif'; x.textAlign='center'; x.textBaseline='middle';
-  [['N',0],['E',Math.PI/2],['S',Math.PI],['W',-Math.PI/2]].forEach(([t,a])=>{ const r=R*0.68; x.fillText(t, Math.sin(a)*r, -Math.cos(a)*r); });
+  if(Q.get('letters')==='1') [['N',0],['E',Math.PI/2],['S',Math.PI],['W',-Math.PI/2]].forEach(([t,a])=>{ const r=R*0.68; x.fillText(t, Math.sin(a)*r, -Math.cos(a)*r); });   // letters off by default (?letters=1)
   const tex=new THREE.CanvasTexture(c); tex.encoding=THREE.sRGBEncoding; tex.anisotropy=4; return tex; }
 { const g=new THREE.CircleGeometry(0.76,128,0,Math.PI*2); add(g,DIAL); shade(g,DIAL);
   const m=compass.children[compass.children.length-1]; m.material=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.55,metalness:0.1,map:dialTexture()}); }   // dial face
