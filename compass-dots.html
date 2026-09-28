@@ -14,7 +14,7 @@
    objx/objy = object-position (0.8 / 0.28)   size = extra scale (1.0)   posX/posY = nudge in frame units
    swing = needle swing (rad, 0.2; 0 = still)   sway = gentle wobble of the whole compass (rad, 0.03)
    seed = texture variation   cut = dot brightness cutoff (0.55)   grad = 1 paints the old video's gradient inside the iframe
-   dot = dot size (0.72 = same as the other pages)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)  */
+   dot = dot size (1.1 = coarse like the old footer video; 0.72 = same as heroes/cards)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
 // the gradient baked into the old footer video (sampled from compass-footer-v3.mp4): light grey -> blue -> navy
 const GRAD='linear-gradient(#ecf1f2 0%,#d0e1ef 6%,#b0cfec 12%,#87b9e9 20%,#539de5 30%,#2182e2 40%,#0769c9 50%,#0953a4 60%,#093c7b 70%,#0a2754 80%,#0b0f2c 90%,#0b0f2c 100%)';
@@ -27,7 +27,7 @@ const CONFIG={ camX:0, camY:0, camZ:3.49, tgtX:0, tgtY:0, fov:32,           // c
   swing:num('swing',0.2), sway:num('sway',0.03), spin0:0, seed:num('seed',1) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
-const DOT=num('dot',0.72);   // dot size + grid spacing scale (1 = the original mountain preset; 0.72 = same as the other pages)
+const DOT=num('dot',1.1);   // dot size + grid spacing scale: the footer uses a coarser grid like the old video (0.72 = same as heroes/cards)
 const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.62), threshold:0, softness:1,
   brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
   chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
@@ -59,7 +59,7 @@ function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(
 
 /* ---- build the pocket compass, face-on like the reference (units: bezel outer radius ~1.04) ----
    Bright (dots): bail ring, thick bezel, case, dial. Dark (gaps): the recessed ring between bezel and dial, the needle's
-   north half and the W/E notches; the dial is otherwise plain, like the tile. The needle swings back and forth. */
+   north half and the W/E notches; the dial is otherwise plain and the crown is a simple blob, like the tile. The needle swings back and forth. */
 const compass=new THREE.Group(), parts=[];
 const add=(g,a,grp)=>{ const col=new Float32Array(g.attributes.position.count*3).fill(a); g.setAttribute('color',new THREE.BufferAttribute(col,3));
   const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; (grp||compass).add(m); return m; };
@@ -73,11 +73,8 @@ for(const sx of [-1,1]){ const g=new THREE.PlaneGeometry(0.16,0.035); g.translat
 const needleG=new THREE.Group(); needleG.position.z=0.03; compass.add(needleG);
 { const sh=new THREE.Shape(); sh.moveTo(0,0.60); sh.lineTo(0.06,0); sh.lineTo(-0.06,0); sh.lineTo(0,0.60);                // north half: narrow dark wedge
   add(new THREE.ExtrudeGeometry(sh,{depth:0.03,bevelEnabled:false}),DARK,needleG);
-  const s2=new THREE.Shape(); s2.moveTo(0.06,0); s2.lineTo(0,-0.50); s2.lineTo(-0.06,0); s2.lineTo(0.06,0);                // south half: pale, barely separates from the dial
-  add(new THREE.ExtrudeGeometry(s2,{depth:0.03,bevelEnabled:false}),0.55,needleG); }
-{ const g=new THREE.CylinderGeometry(0.055,0.055,0.05,24); g.rotateX(Math.PI/2); g.translate(0,0,0.05); add(g,DARK,needleG); }
-{ const g=new THREE.CylinderGeometry(0.07,0.07,0.12,24); g.translate(0,1.10,0); add(g,BRIGHT); }     // crown / neck
-{ const g=new THREE.TorusGeometry(0.16,0.045,16,48); g.translate(0,1.33,0); add(g,BRIGHT); }          // bail ring
+}
+{ const g=new THREE.SphereGeometry(0.11,20,14); g.scale(1.3,0.8,0.8); g.translate(0,1.10,0); add(g,BRIGHT); }   // simple crown on top (the tile shows just a small blob there)
 tScene.add(compass);
 // fit exactly like the old video: 1280x720 stage, CSS cover + object-position, compass at (cx,cy) of the stage
 function place(){ const W=out.clientWidth||1, H=out.clientHeight||1, s=Math.max(W/1280,H/720);
