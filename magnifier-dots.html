@@ -77,16 +77,19 @@ tube([hp(0.98),hp(1.10),hp(1.20)], 0.12, 0.11, [[0.5,0.10]], false);            
 tube([hp(1.15),hp(1.6),hp(2.1),hp(2.55)], 0.10, 0.115, [], false);
 const NHANDLE=parts.length;   // handle parts are black (like the reference) -> no dots
 // back of the hand, thumb muscle and wrist (mostly off-frame, bottom-right)
-blob([2.45,-2.15,-0.34],[1.45,0.50,0.30],-0.96);  // side / back of the hand: ONE smooth strip parallel to the thumb (dark valley between), leaving the frame
-blob([2.32,-2.42,-0.10],[0.66,0.58,0.40],0.9);     // thumb muscle
+blob([2.60,-2.30,-0.36],[1.50,0.46,0.28],-0.96);  // side / back of the hand: ONE smooth strip parallel to the thumb (dark valley between), leaving the frame
 tube([[2.75,-2.25,-0.36],[3.30,-2.95,-0.42],[3.9,-3.7,-0.5]], 0.72, 0.80, [], false);
 // fingers wrapping behind the handle: knuckle (behind, right) -> proximal -> PIP joint -> tip (poking out left)
 function finger(y, tipX, knX, r0, r1){
   tube([[knX+0.18,y+0.06,-0.40],[knX-0.32,y+0.03,-0.38],[(knX+tipX)*0.5-0.05,y-0.01,-0.28],[tipX+0.20,y-0.02,-0.10],[tipX,y+0.01,0.00]],
        r0, r1, [[0.12,0.10],[0.52,0.09],[0.80,0.06]], true, 0.92); }
-finger(-1.34, 0.44, 1.70, 0.235, 0.185);   // index (its tip is the round blob left of the thumb)
-finger(-1.86, 0.88, 1.90, 0.245, 0.192);   // middle (peeks out just under the thumb)
-finger(-2.30, 1.80, 2.10, 0.230, 0.180);   // ring: tucked behind the thumb (the tile shows only index + middle tips)
+// curled fingers like the original: short, touching each other, tips bending down + forward just left of the handle
+function curled(y, tipX, knX, r0, r1){
+  tube([[knX,y+0.05,-0.42],[knX-0.45,y+0.02,-0.36],[tipX+0.28,y-0.06,-0.20],[tipX+0.06,y-0.17,-0.02],[tipX,y-0.27,0.10]],
+       r0, r1, [[0.10,0.08],[0.55,0.10]], true, 0.95); }
+curled(-1.24, 0.58, 1.75, 0.245, 0.205);   // index: its round tip is the blob left of the thumb
+curled(-1.72, 0.80, 1.90, 0.255, 0.215);   // middle: right under the index, touching it
+curled(-2.20, 1.25, 2.05, 0.240, 0.200);   // ring: mostly behind the thumb
 // thumb: in front of the handle, pad pressed against it, pointing up-left; flattened, with a nail near the tip
 const th=tube([[2.20,-2.62,0.00],[1.76,-2.02,0.20],[1.42,-1.56,0.27],[1.17,-1.17,0.22]], 0.33, 0.225, [[0.55,0.06]], true, 0.72);
 { const e=th.getPointAt(0.94), d=th.getTangentAt(0.94), nail=new THREE.SphereGeometry(1,24,14);
