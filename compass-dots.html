@@ -12,7 +12,7 @@
    place at any footer size.
    cx/cy = compass centre on the stage (0.695 / 0.43)   r = bezel radius as a share of stage height (0.285)
    objx/objy = object-position (0.8 / 0.28)   size = extra scale (1.0)   posX/posY = nudge in frame units
-   metal = bezel/case/bail brightness (0.56)   face = dial brightness (0.52)
+   south = south needle tone (0.33; lower = darker, above ~0.38 it fades into the dial)   metal = bezel/case/bail brightness (0.56)   face = dial brightness (0.52)
    swing = needle swing (rad, 0.2; 0 = still)   sway = gentle wobble of the whole compass (rad, 0.03)
    seed = texture variation   cut = dot brightness cutoff (0.55)   grad = 1 paints the old video's gradient inside the iframe
    dot = dot size (0.72 = same as the hero pages)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)  */
@@ -65,7 +65,7 @@ const compass=new THREE.Group(), parts=[];
 const add=(g,a,grp)=>{ const col=new Float32Array(g.attributes.position.count*3).fill(a); g.setAttribute('color',new THREE.BufferAttribute(col,3));
   const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; (grp||compass).add(m); return m; };
 const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.55,metalness:0.1,flatShading:true});   // a little gloss -> tonal gradients like the tile
-const BRIGHT=num('metal',0.56), DIAL=num('face',0.52), DARK=0.03;   // mid tones (not saturated) so the lighting shows as varying dot sizes
+const BRIGHT=num('metal',0.56), DIAL=num('face',0.52), DARK=0.03, SOUTH=num('south',0.33);   // south needle: lighter than the dark north half, like the source   // mid tones (not saturated) so the lighting shows as varying dot sizes
 // dial shading like the old video: brighter toward the top-left, fading toward the bottom
 const shade=(g,a)=>{ const p=g.attributes.position, c=g.attributes.color; for(let i=0;i<p.count;i++){ const x=p.getX(i), y=p.getY(i);
   const k=a*(0.9+0.22*Math.max(-1,Math.min(1,(y*0.8-x*0.3)))); c.setXYZ(i,k,k,k);} c.needsUpdate=true; };
@@ -78,12 +78,14 @@ const shadeB=(g,a)=>{ const p=g.attributes.position, c=g.attributes.color; for(l
 { const g=new THREE.CircleGeometry(0.76,96,0,Math.PI*2); const m=add(g,DIAL); shade(g,DIAL); }                                         // dial face
 // the dial's N/E/S/W pointers: small dark notches at the dial edge (the only dial marks that survive as dots)
 for(let k=0;k<4;k++){ const g=new THREE.PlaneGeometry(0.15,0.06); g.translate(0.70,0,0.005); g.rotateZ(k*Math.PI/2); add(g,DARK); }   // notches cut in from the gap ring
-// needle: the dark north half of the source's diamond + a round hub; in dots it reads as the dark wedge in the tile
+// needle: the source's diamond, dark north half + lighter south half (sparser dots) + a small hub
 const needleG=new THREE.Group(); needleG.position.z=0.03; compass.add(needleG);
 { const n=new THREE.Shape(); n.moveTo(0,0.52); n.lineTo(0.12,0); n.lineTo(-0.12,0); n.lineTo(0,0.52);
   add(new THREE.ExtrudeGeometry(n,{depth:0.03,bevelEnabled:false}),DARK,needleG);
-}   // (the south half is left out: in the tile it disappears into the dial)
-{ const g=new THREE.CylinderGeometry(0.10,0.10,0.05,28); g.rotateX(Math.PI/2); g.translate(0,-0.03,0.05); add(g,DARK,needleG); }   // hub: the round dark end of the needle wedge
+  const so=new THREE.Shape(); so.moveTo(0.12,0); so.lineTo(0,-0.52); so.lineTo(-0.12,0); so.lineTo(0.12,0);   // south half: same length, lighter
+  add(new THREE.ShapeGeometry(so),SOUTH,needleG); }
+{ const g=new THREE.CircleGeometry(0.075,28); g.translate(0,0,0.035); add(g,DARK,needleG); }   // small hub
+needleG.traverse(o=>{ if(o.isMesh){ o.castShadow=false; o.receiveShadow=false; } });            // no shadow streak on the dial
 // crown + bail ring on top, sized from the source (bail ~0.24 of the bezel radius, centred ~1.28 radii up)
 { const g=new THREE.CylinderGeometry(0.095,0.095,0.14,24); g.translate(0,1.11,0); add(g,BRIGHT); }
 { const g=new THREE.TorusGeometry(0.205,0.05,16,56); g.translate(0,1.36,0); add(g,BRIGHT); }
