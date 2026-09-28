@@ -6,10 +6,10 @@
 <script>
 /* ===================== POSITION / MOTION CONFIG =====================
    Edit here, OR override in the iframe URL, e.g.
-   chart-dots.html?posX=-0.1&size=0.9&grow=3&hold=5&dc=0243a9
+   chart-dots.html?posX=-0.1&size=0.9&grow=2&bob=0.08&dc=0243a9
    camZ = zoom (bigger = further/smaller)   camY = camera height   tgtX/tgtY = look-at (nudge left-right / up-down)   fov = lens
    rot = spin speed per frame (0 = still)   spin0 = turn of the row (rad; + shows the lit left sides as strong strips)   sway = gentle turn back and forth (rad)
-   grow = seconds for the bars to rise   hold = seconds they stay up before the loop restarts (0 = rise once and stay)
+   grow = seconds for the bars to shoot up (with a little overshoot)   bob = how much the bars keep rising/falling afterwards (0.06; 0 = still)
    seed = texture variation   posX/posY = move the chart in frame   size = scale (1.0)
    snow = share of the bars that is bright (1 = solid like the tile; lower = mottled)   cut = dot brightness cutoff (0.55)
    dot = dot size (0.72; 1 = original, lower = finer)   dc = dot colour hex (1766b3 = the tile's blue)   op = dot opacity (0.92)
@@ -22,7 +22,7 @@ const CONFIG={ camX:num('camX',0), camY:num('camY',0.10), camZ:num('camZ',3.49),
   tgtX:num('tgtX',0), tgtY:num('tgtY',0), fov:num('fov',32),          // camZ 3.49 + fov 32 -> the frame is ~2 units tall
   posX:num('posX',0), posY:num('posY',0),
   rot:num('rot',0), spin0:num('spin0',0.26), sway:num('sway',0.05), seed:num('seed',1),
-  grow:num('grow',2.6), hold:num('hold',5.5), size:num('size',1.0) };
+  grow:num('grow',1.6), bob:num('bob',0.06), size:num('size',1.0) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
 const DOT=num('dot',0.72);   // dot size + grid spacing scale (1 = the original mountain preset)
@@ -58,7 +58,8 @@ function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(
    Each bar is a unit-height box with its base at y=0, scaled in y to animate the growth, so the vertical
    colour fade (bright at the base, dimmer toward the top -> dots shrink and thin out, like the tile) stays
    attached to the bar as it grows. The row is turned a little so the bars' lit left sides show as narrow, strongly dotted strips. */
-const BW=0.36, BD=0.36, GAP=0.66, HGT=[0.34,0.48,0.64,0.92,1.44];
+const BW=0.50, BD=0.50, GAP=0.59, HGT=[0.26,0.42,0.60,0.84,1.40];   // nearly touching, like the reference
+const LUM=[1.00,0.82,0.72,0.78,1.00];   // per-bar brightness: the dark bars of the video (first + tallest) read strongest in the tile
 const bars=[], white=[0.98,0.97,0.95], dark=[0.008,0.006,0.005];
 const SNOW=Math.min(1,num('snow',1));
 const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true});
@@ -67,7 +68,7 @@ HGT.forEach((h,k)=>{
   const g=new THREE.BoxGeometry(BW,1,BD,3,24,3); g.translate(0,0.5,0);
   const pos=g.attributes.position, V=new THREE.Vector3(), col=new Float32Array(pos.count*3);
   for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i);
-    const fade=0.42+0.58*(1-ss(0.15,1.0,V.y));                                     // base bright, top dimmer
+    const fade=LUM[k]*(0.42+0.58*(1-ss(0.15,1.0,V.y)));                            // base bright, top dimmer
     let c=[white[0]*fade,white[1]*fade,white[2]*fade];
     if(SNOW<1){ const F=fbm(V.x*7+k*3.1,V.y*h*7,V.z*7+2), G=fbm(V.x*15+5,V.y*h*15+k,V.z*15); if(0.55*F+0.45*G<1-SNOW*0.9) c=dark; }
     col[i*3]=c[0]; col[i*3+1]=c[1]; col[i*3+2]=c[2]; }
@@ -79,14 +80,12 @@ row.rotation.y=CONFIG.spin0;
 // frame: bars stand on y=-1.2 (just below the bottom edge); the row runs from the left side to past the right edge
 chart.position.set(0.00+CONFIG.posX, -1.20+CONFIG.posY, 0); chart.scale.setScalar(CONFIG.size); tScene.add(chart);
 let spinAcc=0; const T0=performance.now();
-const ease=t=>t<=0?0:t>=1?1:1-Math.pow(1-t,3);
+const easeBack=t=>{ if(t<=0) return 0; if(t>=1) return 1; const c=1.9; return 1+(c+1)*Math.pow(t-1,3)+c*Math.pow(t-1,2); };   // shoot up, overshoot, settle
 function animate(){ const t=(performance.now()-T0)/1000; spinAcc+=CONFIG.rot;
   row.rotation.y=CONFIG.spin0+spinAcc+CONFIG.sway*Math.sin(t*0.4);
-  const cyc=CONFIG.hold>0?CONFIG.grow+CONFIG.hold+0.9:1e9, tc=t%cyc;                // rise (staggered) -> hold -> quick drop -> repeat
-  bars.forEach((b,k)=>{ const st=k*0.14*CONFIG.grow/HGT.length*2.2;
-    let g=ease((tc-st)/(CONFIG.grow*0.62));
-    if(CONFIG.hold>0 && tc>CONFIG.grow+CONFIG.hold) g*=1-ease((tc-CONFIG.grow-CONFIG.hold)/0.9);
-    b.scale.y=Math.max(0.02, b.userData.h*g*(1+0.012*Math.sin(t*1.3+k))); }); }
+  bars.forEach((b,k)=>{ const g=easeBack((t-k*0.09)/CONFIG.grow);                   // rise one after another
+    const bob=1+CONFIG.bob*(Math.sin(t*(0.9+0.23*k)+k*1.7)*0.7+Math.sin(t*(0.37+0.11*k)+k)*0.3)*Math.min(1,Math.max(0,t-CONFIG.grow)/1.5);  // then keep breathing, each bar on its own rhythm
+    b.scale.y=Math.max(0.02, b.userData.h*g*bob); }); }
 
 /* ===================== dot-grid shader (transparent output) ===================== */
 const out=document.getElementById('out');
