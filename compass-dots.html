@@ -58,26 +58,24 @@ function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(
 
 
 /* ---- build the pocket compass, face-on like the reference (units: bezel outer radius ~1.04) ----
-   Bright (dots): bail ring, thick bezel, case, dial. Dark (gaps): the recessed ring between bezel and dial, the needle
-   and the compass-rose arms, so they read as the dark lines in the tile. The needle swings back and forth. */
+   Bright (dots): bail ring, thick bezel, case, dial. Dark (gaps): the recessed ring between bezel and dial, the needle's
+   north half and the W/E notches; the dial is otherwise plain, like the tile. The needle swings back and forth. */
 const compass=new THREE.Group(), parts=[];
 const add=(g,a,grp)=>{ const col=new Float32Array(g.attributes.position.count*3).fill(a); g.setAttribute('color',new THREE.BufferAttribute(col,3));
   const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; (grp||compass).add(m); return m; };
 const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.7,metalness:0,flatShading:true});
-const BRIGHT=0.95, DIAL=0.9, DARK=0.03, ROSE=0.30;
+const BRIGHT=0.95, DIAL=0.9, DARK=0.03;
 add(new THREE.TorusGeometry(0.92,0.12,24,120),BRIGHT);                                              // bezel
 { const g=new THREE.CylinderGeometry(0.95,0.95,0.16,96,1); g.rotateX(Math.PI/2); g.translate(0,0,-0.10); add(g,BRIGHT*0.85); }   // case behind
 { const g=new THREE.RingGeometry(0.74,0.84,96,1); g.translate(0,0,-0.005); add(g,DARK); }            // recessed dark ring
 { const g=new THREE.CircleGeometry(0.74,96); add(g,DIAL); }                                         // dial face
-for(let k=0;k<8;k++){ const long=k%2===0, L=long?0.62:0.40, w=long?0.05:0.035;                      // compass rose arms (dark thin diamonds)
-  const sh=new THREE.Shape(); sh.moveTo(0,0); sh.lineTo(w,L*0.25); sh.lineTo(0,L); sh.lineTo(-w,L*0.25); sh.lineTo(0,0);
-  const g=new THREE.ShapeGeometry(sh); g.rotateZ(k*Math.PI/4); g.translate(0,0,0.004); add(g,ROSE); }
-for(let k=0;k<48;k++){ const a=k/48*Math.PI*2, big=k%4===0, g=new THREE.PlaneGeometry(big?0.018:0.01, big?0.07:0.04);   // tick marks
-  g.translate(0,0.70-(big?0.035:0.02),0.005); g.rotateZ(a); add(g,DARK); }
+for(const sx of [-1,1]){ const g=new THREE.PlaneGeometry(0.16,0.035); g.translate(sx*0.62,0,0.005); add(g,DARK); }   // W / E notches (the only dial marks that show in the tile)
 const needleG=new THREE.Group(); needleG.position.z=0.03; compass.add(needleG);
-{ const sh=new THREE.Shape(); sh.moveTo(0,0.62); sh.lineTo(0.075,0); sh.lineTo(0,-0.62); sh.lineTo(-0.075,0); sh.lineTo(0,0.62);
-  const g=new THREE.ExtrudeGeometry(sh,{depth:0.03,bevelEnabled:true,bevelThickness:0.01,bevelSize:0.01,bevelSegments:1}); add(g,DARK,needleG); }
-{ const g=new THREE.CylinderGeometry(0.05,0.05,0.05,24); g.rotateX(Math.PI/2); g.translate(0,0,0.05); add(g,DARK,needleG); }
+{ const sh=new THREE.Shape(); sh.moveTo(0,0.60); sh.lineTo(0.06,0); sh.lineTo(-0.06,0); sh.lineTo(0,0.60);                // north half: narrow dark wedge
+  add(new THREE.ExtrudeGeometry(sh,{depth:0.03,bevelEnabled:false}),DARK,needleG);
+  const s2=new THREE.Shape(); s2.moveTo(0.06,0); s2.lineTo(0,-0.50); s2.lineTo(-0.06,0); s2.lineTo(0.06,0);                // south half: pale, barely separates from the dial
+  add(new THREE.ExtrudeGeometry(s2,{depth:0.03,bevelEnabled:false}),0.55,needleG); }
+{ const g=new THREE.CylinderGeometry(0.055,0.055,0.05,24); g.rotateX(Math.PI/2); g.translate(0,0,0.05); add(g,DARK,needleG); }
 { const g=new THREE.CylinderGeometry(0.07,0.07,0.12,24); g.translate(0,1.10,0); add(g,BRIGHT); }     // crown / neck
 { const g=new THREE.TorusGeometry(0.16,0.045,16,48); g.translate(0,1.33,0); add(g,BRIGHT); }          // bail ring
 tScene.add(compass);
