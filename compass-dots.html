@@ -12,7 +12,7 @@
    place at any footer size.
    cx/cy = compass centre on the stage (0.695 / 0.43)   r = bezel radius as a share of stage height (0.285)
    objx/objy = object-position (0.8 / 0.28)   size = extra scale (1.0)   posX/posY = nudge in frame units
-   marks = 0 hides the painted dial markings (ticks, rose)   letters = 1 adds the N/E/S/W letters   south = south needle tone (0.33; lower = darker, above ~0.38 it fades into the dial)   metal = bezel/case/bail brightness (0.56)   face = dial brightness (0.52)
+   marks = 0 hides the painted dial markings (ticks, rose)   letters = 1 adds the N/E/S/W letters   rose = 1 adds the light compass rose   south = south needle tone (0.03 = same dark as north: one clean diamond; ~0.33 = lighter tail)   metal = bezel/case/bail brightness (0.56)   face = dial brightness (0.52)
    swing = needle swing (rad, 0.2; 0 = still)   sway = gentle wobble of the whole compass (rad, 0.03)
    seed = texture variation   cut = dot brightness cutoff (0.55)   grad = 1 paints the old video's gradient inside the iframe
    dot = dot size (0.72 = same as the hero pages)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)  */
@@ -65,7 +65,7 @@ const compass=new THREE.Group(), parts=[];
 const add=(g,a,grp)=>{ const col=new Float32Array(g.attributes.position.count*3).fill(a); g.setAttribute('color',new THREE.BufferAttribute(col,3));
   const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; (grp||compass).add(m); return m; };
 const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.55,metalness:0.1,flatShading:true});   // a little gloss -> tonal gradients like the tile
-const BRIGHT=num('metal',0.56), DIAL=num('face',0.52), DARK=0.03, SOUTH=num('south',0.33);   // south needle: lighter than the dark north half, like the source   // mid tones (not saturated) so the lighting shows as varying dot sizes
+const BRIGHT=num('metal',0.56), DIAL=num('face',0.52), DARK=0.03, SOUTH=num('south',0.03);   // south needle: lighter than the dark north half, like the source   // mid tones (not saturated) so the lighting shows as varying dot sizes
 // dial shading like the old video: brighter toward the top-left, fading toward the bottom
 const shade=(g,a)=>{ const p=g.attributes.position, c=g.attributes.color; for(let i=0;i<p.count;i++){ const x=p.getX(i), y=p.getY(i);
   const k=a*(0.9+0.22*Math.max(-1,Math.min(1,(y*0.8-x*0.3)))); c.setXYZ(i,k,k,k);} c.needsUpdate=true; };
@@ -80,7 +80,8 @@ const shadeB=(g,a)=>{ const p=g.attributes.position, c=g.attributes.color; for(l
 function dialTexture(){ const S=1024, c=document.createElement('canvas'); c.width=c.height=S; const x=c.getContext('2d'), R=S/2;
   x.fillStyle='#fff'; x.fillRect(0,0,S,S); x.translate(R,R);
   const INK=Q.get('marks')==='0'?'#fff':'#555', ROSE=Q.get('marks')==='0'?'#fff':'#e4e4e4';
-  x.fillStyle=ROSE; for(let k=0;k<8;k++){ const L=(k%2?0.52:0.80)*R, w=(k%2?0.07:0.10)*R; x.save(); x.rotate(k*Math.PI/4);
+  if(Q.get('rose')==='1'){ x.fillStyle=ROSE; } else x.fillStyle='rgba(0,0,0,0)';   // rose off by default: keeps the middle clean (?rose=1)
+  for(let k=0;k<8;k++){ const L=(k%2?0.52:0.80)*R, w=(k%2?0.07:0.10)*R; x.save(); x.rotate(k*Math.PI/4);
     x.beginPath(); x.moveTo(0,0); x.lineTo(w,-L*0.3); x.lineTo(0,-L); x.lineTo(-w,-L*0.3); x.closePath(); x.fill(); x.restore(); }
   x.strokeStyle=INK; x.lineCap='butt'; for(let k=0;k<72;k++){ const big=k%6===0, r1=R*0.95, r0=R*(big?0.84:0.89);
     x.lineWidth=big?R*0.030:R*0.016; x.save(); x.rotate(k*Math.PI/36); x.beginPath(); x.moveTo(0,-r0); x.lineTo(0,-r1); x.stroke(); x.restore(); }
