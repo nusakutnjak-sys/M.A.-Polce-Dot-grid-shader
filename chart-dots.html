@@ -12,7 +12,7 @@
    grow = seconds for the bars to shoot up (with a little overshoot)   bob = how much the bars keep rising/falling afterwards (0.06; 0 = still)
    seed = texture variation   posX/posY = move the chart in frame   size = scale (1.0)
    snow = share of the bars that is bright (1 = solid like the tile; lower = mottled)   cut = dot brightness cutoff (0.55)
-   dot = dot size (0.72; 1 = original, lower = finer)   dc = dot colour hex (1766b3 = the tile's blue)   op = dot opacity (0.92)
+   dot = dot size (1.45 = the tile's coarser grid; lower = finer)   dc = dot colour hex (1766b3 = the tile's blue)   op = dot opacity (0.92)   front = front-face dot strength (0.48; lower = paler)
    Framed for the 4:3 pale "Modernize Our Technology" tile: bars rise out of the bottom edge, tallest cut by the right edge. */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
 // opened directly (not in an iframe) -> show the tile's pale background so the blue dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
@@ -25,7 +25,7 @@ const CONFIG={ camX:num('camX',0), camY:num('camY',0.10), camZ:num('camZ',3.49),
   grow:num('grow',1.6), bob:num('bob',0.06), size:num('size',1.0) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
-const DOT=num('dot',0.72);   // dot size + grid spacing scale (1 = the original mountain preset)
+const DOT=num('dot',1.45);   // dot size + grid spacing scale (1 = the original mountain preset; the chart tile uses a coarser grid)
 const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.92), threshold:0, softness:1,
   brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
   chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'1766b3').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
@@ -59,7 +59,7 @@ function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(
    colour fade (bright at the base, dimmer toward the top -> dots shrink and thin out, like the tile) stays
    attached to the bar as it grows. The row is turned a little so the bars' lit left sides show as narrow, strongly dotted strips. */
 const BW=0.50, BD=0.50, GAP=0.59, HGT=[0.26,0.42,0.60,0.84,1.40];   // nearly touching, like the reference
-const LUM=[1.00,0.82,0.72,0.78,1.00];   // per-bar brightness: the dark bars of the video (first + tallest) read strongest in the tile
+const LUM=[1.00,0.82,0.72,0.78,1.00], FRONT=num('front',0.48);   // FRONT = front-face brightness (pale dots)   // per-bar brightness: the dark bars of the video (first + tallest) read strongest in the tile
 const bars=[], white=[0.98,0.97,0.95], dark=[0.008,0.006,0.005];
 const SNOW=Math.min(1,num('snow',1));
 const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true});
@@ -68,8 +68,11 @@ HGT.forEach((h,k)=>{
   const g=new THREE.BoxGeometry(BW,1,BD,3,24,3); g.translate(0,0.5,0);
   const pos=g.attributes.position, V=new THREE.Vector3(), col=new Float32Array(pos.count*3);
   for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i);
-    const fade=LUM[k]*(0.42+0.58*(1-ss(0.15,1.0,V.y)));                            // base bright, top dimmer
-    let c=[white[0]*fade,white[1]*fade,white[2]*fade];
+    // two tones like the tile: lit left sides = big strong dots, front faces = small pale dots (just over the cutoff),
+    // tops/right sides = none; everything thins out toward the top of the bar
+    const nx=g.attributes.normal.getX(i), ny=g.attributes.normal.getY(i), nz=g.attributes.normal.getZ(i), up=ss(0.15,1.0,V.y);
+    let a = nx<-0.5 ? LUM[k]*(0.98-0.30*up) : nz>0.5 ? FRONT*(1-0.22*up)*(0.9+0.1*LUM[k]) : 0.04;
+    let c=[white[0]*a,white[1]*a,white[2]*a];
     if(SNOW<1){ const F=fbm(V.x*7+k*3.1,V.y*h*7,V.z*7+2), G=fbm(V.x*15+5,V.y*h*15+k,V.z*15); if(0.55*F+0.45*G<1-SNOW*0.9) c=dark; }
     col[i*3]=c[0]; col[i*3+1]=c[1]; col[i*3+2]=c[2]; }
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
