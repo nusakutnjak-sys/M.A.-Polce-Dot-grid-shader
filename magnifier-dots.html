@@ -67,7 +67,8 @@ function tube(pts, r0, r1, joints, tip, flatZ){   // tapered tube along a Catmul
     let r=r0+(r1-r0)*t; for(const [jt,jb] of joints) r*=1+jb*Math.exp(-Math.pow((t-jt)/0.07,2));
     for(let j=0;j<=RS;j++){ const k=i*(RS+1)+j; V.fromBufferAttribute(pos,k).sub(c).multiplyScalar(r); V.z*=flatZ||1; V.add(c); pos.setXYZ(k,V.x,V.y,V.z); } }
   parts.push(g);
-  if(tip){ const e=curve.getPointAt(1), s=new THREE.SphereGeometry(r1,20,14); s.scale(1,1,flatZ||1); s.translate(e.x,e.y,e.z); parts.push(s); }
+  if(tip){ const e=curve.getPointAt(1), s=new THREE.SphereGeometry(r1,20,14); s.scale(1,1,flatZ||1); s.translate(e.x,e.y,e.z); parts.push(s);
+    const b=curve.getPointAt(0), s0=new THREE.SphereGeometry(r0,20,14); s0.scale(1,1,flatZ||1); s0.translate(b.x,b.y,b.z); parts.push(s0); }   // round both ends: no flat cut edges
   return curve;
 }
 function blob(c, r, rot){ const g=new THREE.SphereGeometry(1,44,30); g.scale(r[0],r[1],r[2]); if(rot) g.rotateZ(rot); g.translate(c[0],c[1],c[2]); parts.push(g); }
@@ -78,7 +79,7 @@ tube([hp(1.15),hp(1.6),hp(2.1),hp(2.55)], 0.10, 0.115, [], false);
 const NHANDLE=parts.length;   // handle parts are black (like the reference) -> no dots
 // back of the hand, thumb muscle and wrist (mostly off-frame, bottom-right)
 blob([2.60,-2.30,-0.36],[1.50,0.46,0.28],-0.96);  // side of the hand: a strip parallel to the thumb (dark valley between), leaving the frame
-blob([3.57,-2.29,-0.46],[1.30,0.40,0.26],-0.96);  // next strip over, its top stepping down (like the reference), leaving the frame
+blob([1.80,-1.50,-0.40],[0.42,0.32,0.26],-0.96);  // palm filler behind thumb + fingers (closes a small see-through gap)
 tube([[2.75,-2.25,-0.36],[3.30,-2.95,-0.42],[3.9,-3.7,-0.5]], 0.72, 0.80, [], false);
 // fingers wrapping behind the handle: knuckle (behind, right) -> proximal -> PIP joint -> tip (poking out left)
 function finger(y, tipX, knX, r0, r1){
@@ -86,15 +87,13 @@ function finger(y, tipX, knX, r0, r1){
        r0, r1, [[0.12,0.10],[0.52,0.09],[0.80,0.06]], true, 0.92); }
 // curled fingers like the original: short, touching each other, tips bending down + forward just left of the handle
 function curled(y, tipX, knX, r0, r1){
-  tube([[knX,y+0.05,-0.42],[knX-0.45,y+0.02,-0.36],[tipX+0.28,y-0.06,-0.20],[tipX+0.06,y-0.17,-0.02],[tipX,y-0.27,0.10]],
+  tube([[knX+0.30,y-0.10,-0.50],[knX-0.20,y-0.02,-0.40],[knX-0.45,y+0.02,-0.36],[tipX+0.28,y-0.06,-0.20],[tipX+0.06,y-0.17,-0.02],[tipX,y-0.27,0.10]],
        r0, r1, [[0.10,0.08],[0.55,0.10]], true, 0.95); }
 curled(-1.24, 0.58, 1.75, 0.245, 0.205);   // index: its round tip is the blob left of the thumb
 curled(-1.72, 0.80, 1.90, 0.255, 0.215);   // middle: right under the index, touching it
 curled(-2.20, 1.25, 2.05, 0.240, 0.200);   // ring: mostly behind the thumb
 // thumb: in front of the handle, pad pressed against it, pointing up-left; flattened, with a nail near the tip
 const th=tube([[2.20,-2.62,0.00],[1.76,-2.02,0.20],[1.42,-1.56,0.27],[1.17,-1.17,0.22]], 0.33, 0.225, [[0.55,0.06]], true, 0.72);
-{ const e=th.getPointAt(0.94), d=th.getTangentAt(0.94), nail=new THREE.SphereGeometry(1,24,14);
-  nail.scale(0.17,0.13,0.035); nail.rotateZ(Math.atan2(d.y,d.x)); nail.translate(e.x+0.02,e.y-0.02,e.z+0.15); parts.push(nail); }
 const all=new THREE.Group(), ringG=new THREE.TorusGeometry(1,0.085,24,180);
 parts.forEach(g=>g.computeVertexNormals());
 /* ---- vertex colours: like the tile, the hand is bright (solid dots; contrast comes from shading + the shadowed
@@ -121,7 +120,7 @@ geos.forEach((g,gi)=>{ const pos=g.attributes.position, col=new Float32Array(pos
       const f=ss(0.12,0.62,g.attributes.normal.getZ(i)); c=mix(skinDark,c,f); }   // edges turning away go dark -> gaps between thumb / fingers
     col[i*3]=c[0]; col[i*3+1]=c[1]; col[i*3+2]=c[2]; }
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
-  const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; all.add(m); });
+  const m=new THREE.Mesh(g,mat); m.castShadow=false; m.receiveShadow=false; all.add(m); });   // no cast shadows: they made messy dark patches on the hand; the edge darkening already separates the fingers
 const S=0.52*CONFIG.size;                      // lens radius ~0.28 of the frame height, centre ~39% down, like the tile
 all.scale.setScalar(S); all.position.set(CONFIG.posX,CONFIG.posY,0); all.rotation.y=CONFIG.spin0; tScene.add(all);
 let spinAcc=0; const T0=performance.now();
