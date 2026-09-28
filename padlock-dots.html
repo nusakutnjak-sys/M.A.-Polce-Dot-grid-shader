@@ -11,8 +11,8 @@
    rot = spin speed (per 1/60 s; 0.0105 = one turn every ~10 s, like the tile; 0 = still)   spin0 = starting angle (rad)
    seed = texture variation   posX/posY = move the lock in frame   size = scale (1.0)
    snow = share of the lock that is bright (1 = solid; lower = mottled)   cut = dot brightness cutoff (0.55)
-   dot = dot size (0.72 = same as the other pages)   dc = dot colour hex (1a93c8 = the tile's cyan)   op = dot opacity (0.85)
-   metal = lock brightness (0.7; higher = more of it in dots at every angle)
+   dot = dot size (0.72 = same as the other pages)   dc = dot colour hex (0e7d9e = the tile's teal-cyan, sampled from the current video)   op = dot opacity (0.62)
+   body = body brightness vs the shackle (0.82)   metal = lock brightness (0.7; higher = more of it in dots at every angle)
    wave = 1 also paints the tile's pale-blue bottom wave inside the iframe (default 0: transparent, the wave is page CSS)
    Framed for the white "Protect the Business" tile: lock centred, ~46% of the tile height.  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
@@ -22,7 +22,7 @@ const WAVE='linear-gradient(166deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 60
 let framed=true; try{ framed=window.self!==window.top; }catch(e){}
 if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background=WAVE+',#fff';
 else if(Q.get('wave')==='1') document.documentElement.style.background=WAVE;
-const CONFIG={ camX:num('camX',0), camY:num('camY',0.25), camZ:num('camZ',3.49),
+const CONFIG={ camX:num('camX',0), camY:num('camY',0.0), camZ:num('camZ',3.49),
   tgtX:num('tgtX',0), tgtY:num('tgtY',0), fov:num('fov',32),          // camZ 3.49 + fov 32 -> the frame is ~2 units tall
   posX:num('posX',0.04), posY:num('posY',0),
   rot:num('rot',0.0105), spin0:num('spin0',0.5), seed:num('seed',1),
@@ -30,9 +30,9 @@ const CONFIG={ camX:num('camX',0), camY:num('camY',0.25), camZ:num('camZ',3.49),
 
 /* ===================== baked dot-style params (your preset) ===================== */
 const DOT=num('dot',0.72);   // dot size + grid spacing scale (1 = the original mountain preset; 0.72 = same as the other pages)
-const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.85), threshold:0, softness:1,
+const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.62), threshold:0, softness:1,
   brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
-  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'1a93c8').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
+  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'0e7d9e').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
 const KEYGREEN=0x00ff00;
 
 /* ===================== Three.js padlock -> hidden source canvas (on green) ===================== */
@@ -74,11 +74,13 @@ const parts=[];
 for(const sx of [-SR,SR]){ const g=new THREE.CylinderGeometry(ST,ST,LEG+0.12,20,4); g.translate(sx,BHGT+LEG/2-0.06,0); parts.push({g,kind:'shackle'}); }
 /* ---- vertex colours: mid-grey metal (?metal= brightness), so faces only make dots when they catch the light; ?snow<1 mottles ---- */
 const SNOW=Math.min(1,num('snow',1)), white=[0.98,0.97,0.95], dark=[0.008,0.006,0.005];
-const METAL=num('metal',0.7);
+const METAL=num('metal',0.7), BODY=num('body',0.82);
 const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.5,metalness:0.25,flatShading:true});   // a little gloss -> gradients across the faces
 const lock=new THREE.Group(), V=new THREE.Vector3();
 parts.forEach(({g,kind},pi)=>{ const pos=g.attributes.position, col=new Float32Array(pos.count*3);
-  for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i); let c=[white[0]*METAL,white[1]*METAL,white[2]*METAL];
+  for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i); const m=METAL*(kind==='body'?BODY:1);   // body a touch dimmer than the shackle, like the reference
+    let c=[white[0]*m,white[1]*m,white[2]*m];
+    if(kind==='body' && g.attributes.normal.getY(i)>0.3) c=dark;   // body top face never shows in the reference (no stray ledge of dots)
     if(kind!=='hole' && SNOW<1){ const F=fbm(V.x*7+pi,V.y*7,V.z*7+2), G=fbm(V.x*15+5,V.y*15,V.z*15); if(0.55*F+0.45*G<1-SNOW*0.9) c=dark; }
     col[i*3]=c[0]; col[i*3+1]=c[1]; col[i*3+2]=c[2]; }
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
