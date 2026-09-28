@@ -11,7 +11,8 @@
    rot = spin speed (per 1/60 s; 0.0105 = one turn every ~10 s, like the tile; 0 = still)   spin0 = starting angle (rad)
    seed = texture variation   posX/posY = move the lock in frame   size = scale (1.0)
    snow = share of the lock that is bright (1 = solid; lower = mottled)   cut = dot brightness cutoff (0.55)
-   dot = dot size (0.72 = same as the other pages)   dc = dot colour hex (1a9ed4 = the tile's cyan)   op = dot opacity (0.62)
+   dot = dot size (0.72 = same as the other pages)   dc = dot colour hex (1a93c8 = the tile's cyan)   op = dot opacity (0.85)
+   metal = lock brightness (0.7; higher = more of it in dots at every angle)
    wave = 1 also paints the tile's pale-blue bottom wave inside the iframe (default 0: transparent, the wave is page CSS)
    Framed for the white "Protect the Business" tile: lock centred, ~46% of the tile height.  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
@@ -29,9 +30,9 @@ const CONFIG={ camX:num('camX',0), camY:num('camY',0.25), camZ:num('camZ',3.49),
 
 /* ===================== baked dot-style params (your preset) ===================== */
 const DOT=num('dot',0.72);   // dot size + grid spacing scale (1 = the original mountain preset; 0.72 = same as the other pages)
-const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.62), threshold:0, softness:1,
+const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.85), threshold:0, softness:1,
   brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
-  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'1a9ed4').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
+  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'1a93c8').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
 const KEYGREEN=0x00ff00;
 
 /* ===================== Three.js padlock -> hidden source canvas (on green) ===================== */
@@ -59,10 +60,11 @@ function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(
 
 
 /* ---- build the padlock (units: body width = 1; base of the body at y=0) ----
-   Body = rounded rectangle extruded with a bevel (like the reference's brass body), shackle = half torus + two
-   legs going into the body, keyhole = dark inset (no dots). Lit from the upper left as in the template, the
+   Proportions traced from the tile's video: near-square body, tall thick shackle rising about a body-height above it,
+   plain front (no keyhole). The metal is mid-grey and a little glossy, so as the lock turns each face fades in
+   and out of the dots (solid when it faces the light, gone when it turns away), like the reference; the
    front and the lit side read as solid dots, the shaded side and the shackle's inner face fall away. */
-const BWID=1.0, BHGT=0.82, BDEP=0.34, SR=0.30, ST=0.075, LEG=0.26;
+const BWID=1.0, BHGT=0.95, BDEP=0.32, SR=0.29, ST=0.085, LEG=0.545;
 function rrect(w,h,r){ const s=new THREE.Shape(), x=-w/2, y=0; s.moveTo(x+r,y); s.lineTo(x+w-r,y); s.quadraticCurveTo(x+w,y,x+w,y+r);
   s.lineTo(x+w,y+h-r); s.quadraticCurveTo(x+w,y+h,x+w-r,y+h); s.lineTo(x+r,y+h); s.quadraticCurveTo(x,y+h,x,y+h-r); s.lineTo(x,y+r); s.quadraticCurveTo(x,y,x+r,y); return s; }
 const parts=[];
@@ -70,14 +72,13 @@ const parts=[];
   g.translate(0,0.04,-(BDEP-0.08)/2); parts.push({g,kind:'body'}); }
 { const g=new THREE.TorusGeometry(SR,ST,20,48,Math.PI); g.translate(0,BHGT+LEG,0); parts.push({g,kind:'shackle'}); }
 for(const sx of [-SR,SR]){ const g=new THREE.CylinderGeometry(ST,ST,LEG+0.12,20,4); g.translate(sx,BHGT+LEG/2-0.06,0); parts.push({g,kind:'shackle'}); }
-{ const g=new THREE.CylinderGeometry(0.075,0.075,0.02,24); g.rotateX(Math.PI/2); g.translate(0,BHGT*0.52,BDEP/2+0.003); parts.push({g,kind:'hole'});
-  const s=new THREE.BoxGeometry(0.05,0.16,0.02); s.translate(0,BHGT*0.52-0.09,BDEP/2+0.003); parts.push({g:s,kind:'hole'}); }
-/* ---- vertex colours: bright metal (dots), keyhole black (no dots); ?snow<1 mottles like the template ---- */
+/* ---- vertex colours: mid-grey metal (?metal= brightness), so faces only make dots when they catch the light; ?snow<1 mottles ---- */
 const SNOW=Math.min(1,num('snow',1)), white=[0.98,0.97,0.95], dark=[0.008,0.006,0.005];
-const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true});
+const METAL=num('metal',0.7);
+const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.5,metalness:0.25,flatShading:true});   // a little gloss -> gradients across the faces
 const lock=new THREE.Group(), V=new THREE.Vector3();
 parts.forEach(({g,kind},pi)=>{ const pos=g.attributes.position, col=new Float32Array(pos.count*3);
-  for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i); let c=kind==='hole'?dark:white;
+  for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i); let c=[white[0]*METAL,white[1]*METAL,white[2]*METAL];
     if(kind!=='hole' && SNOW<1){ const F=fbm(V.x*7+pi,V.y*7,V.z*7+2), G=fbm(V.x*15+5,V.y*15,V.z*15); if(0.55*F+0.45*G<1-SNOW*0.9) c=dark; }
     col[i*3]=c[0]; col[i*3+1]=c[1]; col[i*3+2]=c[2]; }
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
