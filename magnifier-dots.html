@@ -9,19 +9,19 @@
    magnifier-dots.html?camZ=4&posX=-0.1&posY=0.05&size=0.9&sway=0.1
    camZ = zoom (bigger = further/smaller)   camY = camera height   tgtX/tgtY = look-at (nudge left-right / up-down)   fov = lens
    rot = spin speed per frame (0 = still)   spin0 = starting angle (rad)   sway = gentle hand motion (rad, 0 = still)
-   seed = texture variation   posX/posY = move the lens (its centre) in frame   size = scale (1.0)
-   snow = bright-material share (0.36 -> ~58% of the object in dots; lower = sparser)   cut = dot brightness cutoff (0.55)
+   seed = texture variation   posX/posY = move the lens (its centre) in frame   size = scale (0.9)
+   snow = bright-material share (0.33 -> ~58% of the object in dots; lower = sparser)   cut = dot brightness cutoff (0.55)
    dc = dot colour hex, e.g. dc=ffffff
-   Framed for the 4:3 "Meet Compliance Requirements" tile (lens left of centre, hand entering bottom-right).  */
+   Framed for the 4:3 "Meet Compliance Requirements" tile (lens left of centre below the copy, hand + wrist to the bottom-right).  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
 // opened directly (not in an iframe) -> show the tile's gradient so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
 let framed=true; try{ framed=window.self!==window.top; }catch(e){}
 if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='linear-gradient(130.796deg,#071231 0%,#0243a9 50%,#759ad0 100%) fixed';
 const CONFIG={ camX:num('camX',0), camY:num('camY',0), camZ:num('camZ',3.49),
   tgtX:num('tgtX',0), tgtY:num('tgtY',0), fov:num('fov',32),          // camZ 3.49 + fov 32 -> the frame is 2 units tall
-  posX:num('posX',-0.19), posY:num('posY',-0.12),                     // lens centre in frame units (x: -1.33..1.33 at 4:3, y: -1..1)
+  posX:num('posX',-0.36), posY:num('posY',0.06),                     // lens centre in frame units (x: -1.33..1.33 at 4:3, y: -1..1)
   rot:num('rot',0), spin0:num('spin0',-0.28), sway:num('sway',0.07), seed:num('seed',1),
-  size:num('size',1.0) };
+  size:num('size',0.9) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
 const P={ spacing:10, minSize:2.6, maxSize:5.2, dotOpacity:0.62, threshold:0, softness:1,
@@ -52,48 +52,56 @@ function ridgedMF(x,y,z){ let sum=0,f=1,w=0.55,prev=1; for(let o=0;o<6;o++){ let
 function ss(e0,e1,x){x=Math.max(0,Math.min(1,(x-e0)/(e1-e0)));return x*x*(3-2*x);}
 function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
 
-/* ---- build the magnifier + hand (units: lens radius = 1) ----
-   Lens = torus rim (no glass: the inside stays empty, like the tile). The handle leaves the rim toward the
-   bottom-right; everything along it is built in a "handle frame": +x along the handle (away from the lens),
-   +y = the thumb side, +z = toward the camera. Fingers are tubes along curves with a tapering radius. */
+/* ---- build the magnifier + hand (units: lens radius = 1, lens centre = origin; x right, y up, z to camera) ----
+   Pose traced from the reference: we look at the thumb side of a right hand. The thumb lies in FRONT of the
+   handle pointing up-left (nail beside the handle); index / middle / ring fingers wrap round BEHIND the handle
+   and their tips poke out on its left, stacked top to bottom; the back of the hand + wrist leave the frame
+   bottom-right. Fingers are tapered tubes with knuckle bulges at the joints. Lens = torus rim, no glass. */
 const V=new THREE.Vector3(), parts=[];
-function tube(pts, r0, r1, knuckle, tip){   // tapered tube along a Catmull-Rom curve; knuckle = mid bulge; tip = round cap
-  const curve=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p))), TS=48, RS=18;
+function tube(pts, r0, r1, joints, tip, flatZ){   // tapered tube along a Catmull-Rom curve; joints=[[t,bulge],..]; flatZ squashes depth
+  const curve=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p))), TS=56, RS=20;
   const g=new THREE.TubeGeometry(curve,TS,1,RS,false), pos=g.attributes.position;
-  for(let i=0;i<=TS;i++){ const t=i/TS, c=curve.getPointAt(t), r=(r0+(r1-r0)*t)*(1+knuckle*Math.exp(-Math.pow((t-0.55)/0.12,2)));
-    for(let j=0;j<=RS;j++){ const k=i*(RS+1)+j; V.fromBufferAttribute(pos,k).sub(c).multiplyScalar(r).add(c); pos.setXYZ(k,V.x,V.y,V.z); } }
+  for(let i=0;i<=TS;i++){ const t=i/TS, c=curve.getPointAt(t);
+    let r=r0+(r1-r0)*t; for(const [jt,jb] of joints) r*=1+jb*Math.exp(-Math.pow((t-jt)/0.07,2));
+    for(let j=0;j<=RS;j++){ const k=i*(RS+1)+j; V.fromBufferAttribute(pos,k).sub(c).multiplyScalar(r); V.z*=flatZ||1; V.add(c); pos.setXYZ(k,V.x,V.y,V.z); } }
   parts.push(g);
-  if(tip){ const e=curve.getPointAt(1), s=new THREE.SphereGeometry(r1,18,12); s.translate(e.x,e.y,e.z); parts.push(s); }
+  if(tip){ const e=curve.getPointAt(1), s=new THREE.SphereGeometry(r1,20,14); s.scale(1,1,flatZ||1); s.translate(e.x,e.y,e.z); parts.push(s); }
+  return curve;
 }
-function blob(c, r, rot){ const g=new THREE.SphereGeometry(1,40,28); g.scale(r[0],r[1],r[2]); if(rot) g.rotateZ(rot); g.translate(c[0],c[1],c[2]); parts.push(g); }
-// handle (mostly hidden in the fist) + a short neck/ferrule at the rim
-tube([[0,0,0],[0.5,0,0],[1.2,0,0],[1.9,0,0]], 0.10, 0.12, 0, false);
-tube([[-0.05,0,0],[0.10,0,0],[0.22,0,0]], 0.13, 0.12, 0.08, false);
-const NH=parts.length;   // parts before this are the handle; everything after is the hand (scaled up below)
-// pinch grip, like the reference: thumb along the lower-left side of the handle (round tip showing),
-// index + middle fingers running parallel along the upper-right side toward the lens, ring finger tucked,
-// palm + forearm leaving the frame bottom-right
-blob([2.15,0.40,-0.28],[0.85,0.78,0.46],0.25);
-tube([[2.5,0.35,-0.30],[3.3,0.45,-0.45],[4.3,0.55,-0.6]], 0.58, 0.66, 0, false);
-tube([[1.75,-0.42,0.02],[1.25,-0.30,0.16],[0.80,-0.19,0.15],[0.52,-0.14,0.08]], 0.21, 0.16, 0.10, true);   // thumb
-tube([[1.95,0.30,0.04],[1.35,0.23,0.19],[0.88,0.16,0.19],[0.60,0.12,0.08]], 0.17, 0.13, 0.16, true);      // index
-tube([[2.05,0.62,0.00],[1.50,0.55,0.16],[1.10,0.45,0.15],[0.92,0.37,0.02]], 0.17, 0.14, 0.16, true);      // middle
-tube([[2.15,0.92,-0.05],[1.72,0.86,0.10],[1.42,0.76,0.08],[1.34,0.66,-0.06]], 0.16, 0.13, 0.14, true);    // ring (tucked)
-// assemble: handle frame -> points bottom-right from the rim
-const HANG=-0.98;                              // handle direction in the image (rad; ~-56 deg like the tile)
-const HS=1.45; parts.forEach((g,i)=>{ if(i>=NH){ g.translate(-0.9,0,0); g.scale(HS,HS,HS); g.translate(0.9,0,0); } });   // hand ~as wide as the lens, like the reference
-const all=new THREE.Group(), hand=new THREE.Group(), ringG=new THREE.TorusGeometry(1,0.085,24,180);
+function blob(c, r, rot){ const g=new THREE.SphereGeometry(1,44,30); g.scale(r[0],r[1],r[2]); if(rot) g.rotateZ(rot); g.translate(c[0],c[1],c[2]); parts.push(g); }
+// handle: leaves the rim at ~-55 deg, disappears behind the thumb
+const HA=-0.96, hx=Math.cos(HA), hy=Math.sin(HA), hp=d=>[hx*d, hy*d, 0];
+tube([hp(0.98),hp(1.10),hp(1.20)], 0.12, 0.11, [[0.5,0.10]], false);              // ferrule at the rim
+tube([hp(1.15),hp(1.6),hp(2.1),hp(2.55)], 0.10, 0.115, [], false);
+// back of the hand, thumb muscle and wrist (mostly off-frame, bottom-right)
+blob([2.35,-1.80,-0.50],[1.25,0.82,0.30],-0.55);   // back of the hand: flat, sloping down-right from the index knuckle
+blob([2.75,-2.35,-0.45],[0.90,0.80,0.34],-0.4);    // ...and filling toward the wrist
+blob([2.32,-2.42,-0.10],[0.66,0.58,0.40],0.9);     // thumb muscle
+tube([[2.75,-2.25,-0.36],[3.30,-2.95,-0.42],[3.9,-3.7,-0.5]], 0.72, 0.80, [], false);
+// fingers wrapping behind the handle: knuckle (behind, right) -> proximal -> PIP joint -> tip (poking out left)
+function finger(y, tipX, knX, r0, r1){
+  tube([[knX+0.18,y+0.06,-0.40],[knX-0.32,y+0.03,-0.38],[(knX+tipX)*0.5-0.05,y-0.01,-0.28],[tipX+0.20,y-0.02,-0.10],[tipX,y+0.01,0.00]],
+       r0, r1, [[0.12,0.10],[0.52,0.09],[0.80,0.06]], true, 0.92); }
+finger(-1.16, 0.12, 1.60, 0.235, 0.185);   // index
+finger(-1.66, 0.46, 1.80, 0.245, 0.192);   // middle
+finger(-2.16, 0.50, 1.85, 0.230, 0.180);   // ring
+finger(-2.60, 0.80, 1.90, 0.195, 0.155);   // little finger (mostly below the frame)
+// thumb: in front of the handle, pad pressed against it, pointing up-left; flattened, with a nail near the tip
+const th=tube([[2.20,-2.62,0.00],[1.76,-2.02,0.20],[1.42,-1.56,0.27],[1.17,-1.17,0.22]], 0.33, 0.225, [[0.55,0.06]], true, 0.72);
+{ const e=th.getPointAt(0.94), d=th.getTangentAt(0.94), nail=new THREE.SphereGeometry(1,24,14);
+  nail.scale(0.17,0.13,0.035); nail.rotateZ(Math.atan2(d.y,d.x)); nail.translate(e.x+0.02,e.y-0.02,e.z+0.15); parts.push(nail); }
+const all=new THREE.Group(), ringG=new THREE.TorusGeometry(1,0.085,24,180);
 parts.forEach(g=>g.computeVertexNormals());
 /* ---- vertex colours: dark (gaps) vs bright (dots); field picked by quantile like the template ---- */
-const geos=[ringG,...parts], M=new THREE.Matrix4().makeRotationZ(HANG).setPosition(Math.cos(HANG)*1.02,Math.sin(HANG)*1.02,0);
+const geos=[ringG,...parts];
 const SFs=[], sfv=[];
-for(const g of geos){ const pos=g.attributes.position, nrm=g.attributes.normal, isRing=g===ringG, SF=new Float32Array(pos.count);
-  for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i); if(!isRing) V.applyMatrix4(M);          // noise in the assembled frame
+for(const g of geos){ const pos=g.attributes.position, nrm=g.attributes.normal, SF=new Float32Array(pos.count);
+  for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i);
     const R=ridgedMF(V.x*1.4+3,V.y*1.4,V.z*1.4+1), F=fbm(V.x*7.0+2,V.y*7.0,V.z*7.0+9), G=fbm(V.x*15.0+5,V.y*15.0,V.z*15.0+1);
-    const up=Math.max(0,nrm.getZ(i)*(isRing?1:1));                                                       // facing the camera
+    const up=Math.max(0,nrm.getZ(i));                                                                     // facing the camera
     SF[i]=0.22*(1-R)+0.36*F+0.32*G+0.10*up; sfv.push(SF[i]); }
   SFs.push(SF); }
-sfv.sort((a,b)=>a-b); const SNOW_LO=sfv[Math.floor(sfv.length*(1-num('snow',0.36)))]-0.03;
+sfv.sort((a,b)=>a-b); const SNOW_LO=sfv[Math.floor(sfv.length*(1-num('snow',0.33)))]-0.03;
 const skinTan=[0.06,0.043,0.028], skinMid=[0.03,0.021,0.014], skinDark=[0.008,0.006,0.005], white=[0.98,0.97,0.95]; // linear: darks = gaps, white = dots
 const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true});
 geos.forEach((g,gi)=>{ const pos=g.attributes.position, col=new Float32Array(pos.count*3), SF=SFs[gi];
@@ -101,9 +109,8 @@ geos.forEach((g,gi)=>{ const pos=g.attributes.position, col=new Float32Array(pos
     const R=fbm(V.x*4+11,V.y*4,V.z*4+5); let c=mix(skinDark,skinTan,ss(0.3,0.7,R)); c=mix(c,skinMid,ss(0.55,0.3,R)*0.35);
     c=mix(c,white,ss(SNOW_LO,SNOW_LO+0.06,SF[i])); col[i*3]=c[0]; col[i*3+1]=c[1]; col[i*3+2]=c[2]; }
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
-  const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; (g===ringG?all:hand).add(m); });
-hand.rotation.z=HANG; hand.position.set(Math.cos(HANG)*1.02,Math.sin(HANG)*1.02,0); all.add(hand);
-const S=0.40*CONFIG.size;                      // lens outer radius ~0.2 of the frame height (like the tile)
+  const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; all.add(m); });
+const S=0.34*CONFIG.size;                      // lens radius ~0.17 of the frame height -> the whole hand fits, wrist leaves bottom-right
 all.scale.setScalar(S); all.position.set(CONFIG.posX,CONFIG.posY,0); all.rotation.y=CONFIG.spin0; tScene.add(all);
 let spinAcc=0; const T0=performance.now();
 function animate(){ const t=(performance.now()-T0)/1000; spinAcc+=CONFIG.rot;   // gentle hand-held motion, like the reference
