@@ -1,0 +1,150 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Dot Globe</title>
+<style>html,body{margin:0;height:100%;background:transparent}#out{position:fixed;inset:0;width:100%;height:100%;display:block}</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+</head><body>
+<canvas id="out"></canvas>
+<script>
+/* ===================== POSITION / MOTION CONFIG =====================
+   Edit here, OR override in the iframe URL, e.g.
+   globe-dots.html?camZ=6&tgtY=1.3&rot=0.002&spin0=-1.9&tilt=0.4
+   camZ = zoom (bigger = further/smaller)   camY = camera height   tgtX/tgtY = look-at (nudge left-right / up-down)   fov = lens
+   rot = spin speed per frame (0 = still)   spin0 = starting longitude (rad; default = Africa/Europe facing you)
+   tilt = axis tilt (rad)   lean = north pole toward (+) / away from (-) the camera
+   seed = cloud/texture variation   posX/posY = move the globe in frame (default: centre sits on the bottom edge)   size = scale (1.0)
+   snow = share of the land that gets dots (0.84; the sea gets about a quarter of that as clouds; lower = sparser)   cut = dot brightness cutoff (0.55)
+   dc = dot colour hex, e.g. dc=ffffff                                 */
+const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+// opened directly (not in an iframe) -> show the preset gradient so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
+let framed=true; try{ framed=window.self!==window.top; }catch(e){}
+if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='linear-gradient(173deg,#0a0f2c 0%,#0243ac 45%,#f0f1f3 90%) fixed';
+const CONFIG={ camX:num('camX',0), camY:num('camY',1.59), camZ:num('camZ',5.54),
+  tgtX:num('tgtX',0), tgtY:num('tgtY',1.59), fov:num('fov',32),
+  posX:num('posX',0), posY:num('posY',0),              // globe centre; with the default camera y=0 is the bottom edge of the frame
+  rot:num('rot',0.0006), spin0:num('spin0',-1.95), tilt:num('tilt',-0.38), lean:num('lean',0.22), seed:num('seed',1),
+  size:num('size',1.0) };                              // globe radius (1 = like the reference: ~0.63x frame height across)
+
+/* ===================== baked dot-style params (your preset) ===================== */
+const P={ spacing:10, minSize:2.6, maxSize:5.2, dotOpacity:0.62, threshold:0, softness:1,
+  brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
+  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
+const KEYGREEN=0x00ff00;
+
+/* ===================== Three.js globe -> hidden source canvas (on green) ===================== */
+const src=document.createElement('canvas');
+const three=new THREE.WebGLRenderer({canvas:src,antialias:true}); three.setPixelRatio(1); three.outputEncoding=THREE.sRGBEncoding;
+three.shadowMap.enabled=true; three.shadowMap.type=THREE.PCFSoftShadowMap;   // self-shadowing = relief on the continents
+const tScene=new THREE.Scene(); tScene.background=new THREE.Color(KEYGREEN);
+const tCam=new THREE.PerspectiveCamera(CONFIG.fov,1,0.1,100); tCam.position.set(CONFIG.camX,CONFIG.camY,CONFIG.camZ); tCam.lookAt(CONFIG.tgtX,CONFIG.tgtY,0);
+tScene.add(new THREE.HemisphereLight(0xdfe8ff,0x2a1e16,0.30));                // lower fill -> deeper shadows
+const key=new THREE.DirectionalLight(0xfff1df,1.45); key.position.set(-3.5,5.5,5); key.castShadow=true;
+key.shadow.mapSize.set(2048,2048); key.shadow.camera.near=0.5; key.shadow.camera.far=22;
+key.shadow.camera.left=-2.6;key.shadow.camera.right=2.6;key.shadow.camera.top=2.6;key.shadow.camera.bottom=-2.6;
+key.shadow.bias=-0.0006; tScene.add(key);
+const rim=new THREE.DirectionalLight(0xbcd2ff,0.28); rim.position.set(4,1.5,-4); tScene.add(rim);
+
+/* ---- noise: value noise + fBm + ridged multifractal ---- */
+const SEED=CONFIG.seed*97.13;
+function fract(x){return x-Math.floor(x);} function hash3(i,j,k){return fract(Math.sin((i+SEED)*127.1+(j)*311.7+(k)*74.7)*43758.5453);} function smt(t){return t*t*(3-2*t);}
+function vnoise(x,y,z){const ix=Math.floor(x),iy=Math.floor(y),iz=Math.floor(z),fx=x-ix,fy=y-iy,fz=z-iz;const u=smt(fx),v=smt(fy),w=smt(fz);const L=(a,b,t)=>a+(b-a)*t,C=(dx,dy,dz)=>hash3(ix+dx,iy+dy,iz+dz);const x00=L(C(0,0,0),C(1,0,0),u),x10=L(C(0,1,0),C(1,1,0),u),x01=L(C(0,0,1),C(1,0,1),u),x11=L(C(0,1,1),C(1,1,1),u);return L(L(x00,x10,v),L(x01,x11,v),w);}
+function fbm(x,y,z){let a=0,amp=0.5,f=1;for(let o=0;o<5;o++){a+=amp*vnoise(x*f,y*f,z*f);f*=2.03;amp*=0.5;}return a;}
+function snoise(x,y,z){return vnoise(x,y,z)*2-1;}
+function ridgedMF(x,y,z){ let sum=0,f=1,w=0.55,prev=1; for(let o=0;o<6;o++){ let n=1-Math.abs(snoise(x*f,y*f,z*f)); n=n*n; sum+=n*w*prev; prev=Math.min(1,n*2.2); f*=2.07; w*=0.5; } return sum; } // 0..~1, sharp ridges
+function ss(e0,e1,x){x=Math.max(0,Math.min(1,(x-e0)/(e1-e0)));return x*x*(3-2*x);}
+function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
+
+/* ---- build the globe ----
+   A UV sphere; the land/water mask (three-globe's earth-water map, equirectangular, water = white) decides the
+   continents. Land is lifted a touch with ridged relief so flat shading + self-shadow give it texture and the
+   silhouette isn't a perfect circle; swirly fBm "clouds" drift over the oceans like in the reference. */
+const tiltG=new THREE.Group(); tiltG.rotation.set(CONFIG.lean,0,CONFIG.tilt);   // axis tilt (lean = north pole toward camera)
+tiltG.position.set(CONFIG.posX,CONFIG.posY,0); tiltG.scale.setScalar(CONFIG.size); tScene.add(tiltG);
+let globe=null;
+function buildGlobe(land){   // land(u,v) -> 0 (water) .. 1 (land)
+  const geo=new THREE.SphereGeometry(1,300,150), pos=geo.attributes.position, uv=geo.attributes.uv, V=new THREE.Vector3();
+  const LAND=new Float32Array(pos.count), REL=new Float32Array(pos.count);
+  for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i); const l=land(uv.getX(i),uv.getY(i)); LAND[i]=l;
+    const R=ridgedMF(V.x*3.2+1.3,V.y*3.2,V.z*3.2+4.1), C=fbm(V.x*9+7,V.y*9,V.z*9+3);
+    REL[i]=R; const h=l*(0.006+0.014*R+0.006*C) + (1-l)*0.002*C;       // continents stand proud, oceans nearly flat
+    V.multiplyScalar(1+h); pos.setXYZ(i,V.x,V.y,V.z); }
+  geo.computeVertexNormals();
+  /* ---- vertex colours: dark ocean (gaps) vs bright land + clouds (dots) ---- */
+  const nrm=geo.attributes.normal, SF=new Float32Array(pos.count), sfL=[], sfO=[];
+  for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i);
+    const wx=V.x*2.1+0.9*fbm(V.x*1.7+3,V.y*4.5,V.z*1.7), wz=V.z*2.1+0.9*fbm(V.z*1.7+8,V.y*4.5,V.x*1.7);   // stretched along latitude -> swirl bands
+    const cloud=ss(0.56,0.74,fbm(wx,V.y*5.2,wz));
+    const F=fbm(V.x*7.0+2, V.y*7.0, V.z*7.0+9), G=fbm(V.x*15.0+5, V.y*15.0, V.z*15.0+1);
+    const up=Math.max(0,V.clone().normalize().dot(new THREE.Vector3(nrm.getX(i),nrm.getY(i),nrm.getZ(i))));   // facing straight out (not a relief slope)
+    SF[i]=LAND[i]>0.5 ? 0.22*(1-REL[i]) + 0.36*F + 0.32*G + 0.10*up          // land: the template's mottled field
+                      : 0.55*cloud + 0.25*F + 0.20*G;                          // sea: cloud streaks
+    (LAND[i]>0.5?sfL:sfO).push(SF[i]); }
+  // two quantile thresholds, so the land always reads (fixed fill) and the sea stays sparse at any longitude
+  const qt=(a,share)=>{a.sort((x,y)=>x-y); return a.length?a[Math.min(a.length-1,Math.floor(a.length*(1-share)))]-0.03:1;};
+  const SNOW=num('snow',0.84), LAND_LO=qt(sfL,SNOW), SEA_LO=qt(sfO,SNOW*0.26);
+  const oceanDeep=[0.008,0.010,0.030], oceanMid=[0.030,0.045,0.14], landDark=[0.05,0.035,0.024], white=[0.98,0.97,0.95]; // linear: darks = gaps, white = dots
+  const col=new Float32Array(pos.count*3);
+  for(let i=0;i<pos.count;i++){ V.fromBufferAttribute(pos,i);
+    let c=mix(oceanDeep, oceanMid, fbm(V.x*4+11,V.y*4,V.z*4+5));
+    c=mix(c, landDark, LAND[i]);
+    const lo=LAND[i]>0.5?LAND_LO:SEA_LO; c=mix(c, white, ss(lo, lo+0.06, SF[i]));
+    col[i*3]=c[0]; col[i*3+1]=c[1]; col[i*3+2]=c[2]; }
+  geo.setAttribute('color', new THREE.BufferAttribute(col,3));
+  globe=new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true}));
+  globe.castShadow=true; globe.receiveShadow=true;   // relief self-shadows
+  globe.rotation.y=CONFIG.spin0; tiltG.add(globe);
+}
+// land mask: load the map; if the CDN is unreachable, fall back to procedural continents so the embed never breaks
+const img=new Image(); img.crossOrigin='anonymous';
+img.onload=()=>{ const W=1024,Hh=512, c=document.createElement('canvas'); c.width=W; c.height=Hh; const x=c.getContext('2d'); x.drawImage(img,0,0,W,Hh);
+  const d=x.getImageData(0,0,W,Hh).data;
+  const at=(px,py)=>{ px=((px%W)+W)%W; py=Math.max(0,Math.min(Hh-1,py)); return 1-d[(py*W+px)*4]/255; };
+  buildGlobe((u,v)=>{ const fx=u*W-0.5, fy=(1-v)*Hh-0.5, x0=Math.floor(fx), y0=Math.floor(fy), tx=fx-x0, ty=fy-y0;   // bilinear
+    return (at(x0,y0)*(1-tx)+at(x0+1,y0)*tx)*(1-ty)+(at(x0,y0+1)*(1-tx)+at(x0+1,y0+1)*tx)*ty; }); };
+img.onerror=()=>buildGlobe((u,v)=>{ const th=u*6.2832, ph=v*3.1416; return ss(0.5,0.56,fbm(Math.cos(th)*Math.sin(ph)*2+5,Math.cos(ph)*2,Math.sin(th)*Math.sin(ph)*2)); });
+img.src='https://cdn.jsdelivr.net/npm/three-globe@2.45.2/example/img/earth-water.png';
+function animate(){ if(globe) globe.rotation.y+=CONFIG.rot; }
+
+/* ===================== dot-grid shader (transparent output) ===================== */
+const out=document.getElementById('out');
+const gl=out.getContext('webgl',{premultipliedAlpha:true,alpha:true,antialias:false});
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+const VS='attribute vec2 aPos;varying vec2 vUv;void main(){vUv=aPos*0.5+0.5;gl_Position=vec4(aPos,0.,1.);}';
+const FS=['precision highp float;varying vec2 vUv;uniform sampler2D uSrc;uniform vec2 uRes;uniform float uCell;',
+'uniform float uMinSize,uMaxSize,uDotOpacity;uniform vec3 uDotColor;uniform float uBrightness,uContrast,uGamma,uInvert,uThreshold,uSoftness;',
+'uniform float uCutoff,uCutoffSoft,uInvertMask,uShaderOpacity,uChroma,uChromaThresh,uChromaSoft;uniform vec3 uChromaColor;',
+'float luma(vec3 c){return dot(c,vec3(0.299,0.587,0.114));}',
+'void main(){vec2 fp=vUv*uRes;vec2 cell=floor(fp/uCell);vec2 ctr=(cell+0.5)*uCell;vec3 rgb=texture2D(uSrc,ctr/uRes).rgb;float rawL=luma(rgb);',
+'float mask=smoothstep(uCutoff,uCutoff+max(uCutoffSoft,0.001),rawL);if(uInvertMask>0.5)mask=1.0-mask;',
+'if(uChroma>0.5){float ky=luma(uChromaColor);vec2 kc=vec2(uChromaColor.b-ky,uChromaColor.r-ky);float py=luma(rgb);vec2 pc=vec2(rgb.b-py,rgb.r-py);mask*=smoothstep(uChromaThresh,uChromaThresh+max(uChromaSoft,0.001),distance(pc,kc));}',
+'float L=rawL;L+=uBrightness;L=(L-0.5)*uContrast+0.5;L=clamp(L,0.,1.);L=pow(L,1.0/uGamma);if(uInvert>0.5)L=1.0-L;',
+'float dv=smoothstep(uThreshold,uThreshold+max(uSoftness,0.001),L);',
+'float hc=uCell*0.5;float rad=min(mix(uMinSize,uMaxSize,dv)*0.5,hc);float d=distance(fp,ctr);float cov=1.0-smoothstep(rad-1.0,rad+1.0,d);',
+'float a=cov*uDotOpacity*mask*uShaderOpacity;gl_FragColor=vec4(uDotColor*a,a);}'].join('\n');
+function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(x));return x;}
+const prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(prog);gl.useProgram(prog);
+const quad=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const loc=gl.getAttribLocation(prog,'aPos');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+const U=n=>gl.getUniformLocation(prog,n); let RW=0,RH=0;
+function resize(){const dpr=Math.min(devicePixelRatio||1,2);const w=Math.max(2,Math.round(out.clientWidth*dpr)),h=Math.max(2,Math.round(out.clientHeight*dpr));if(w===RW&&h===RH)return;RW=w;RH=h;out.width=w;out.height=h;src.width=w;src.height=h;three.setSize(w,h,false);tCam.aspect=w/h;tCam.updateProjectionMatrix();}
+let running=true;
+function frame(){ if(!running){requestAnimationFrame(frame);return;} resize();
+  animate(); three.render(tScene,tCam);
+  gl.viewport(0,0,RW,RH); gl.useProgram(prog);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src);
+  const ds=RH/P.refH;   // dots scale with height, like the camera (vertical FOV) -> same dot density on the globe at any aspect
+  gl.uniform1i(U('uSrc'),0); gl.uniform2f(U('uRes'),RW,RH); gl.uniform1f(U('uCell'),Math.max(2,P.spacing)*ds);
+  gl.uniform1f(U('uMinSize'),P.minSize*ds); gl.uniform1f(U('uMaxSize'),P.maxSize*ds); gl.uniform1f(U('uDotOpacity'),P.dotOpacity);
+  gl.uniform3f(U('uDotColor'),P.dotColor[0],P.dotColor[1],P.dotColor[2]);
+  gl.uniform1f(U('uBrightness'),P.brightness); gl.uniform1f(U('uContrast'),P.contrast); gl.uniform1f(U('uGamma'),Math.max(0.01,P.gamma));
+  gl.uniform1f(U('uInvert'),P.invert); gl.uniform1f(U('uThreshold'),P.threshold); gl.uniform1f(U('uSoftness'),P.softness);
+  gl.uniform1f(U('uCutoff'),P.cutoff); gl.uniform1f(U('uCutoffSoft'),P.cutoffSoft); gl.uniform1f(U('uInvertMask'),P.invertMask);
+  gl.uniform1f(U('uShaderOpacity'),P.shaderOpacity); gl.uniform1f(U('uChroma'),P.chroma);
+  gl.uniform3f(U('uChromaColor'),P.chromaColor[0],P.chromaColor[1],P.chromaColor[2]); gl.uniform1f(U('uChromaThresh'),P.chromaThresh); gl.uniform1f(U('uChromaSoft'),P.chromaSoft);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES,0,3);
+  requestAnimationFrame(frame);
+}
+if('IntersectionObserver' in window){ new IntersectionObserver(es=>{running=es[0].isIntersecting;}).observe(out); }
+resize(); requestAnimationFrame(frame);
+</script></body></html>
