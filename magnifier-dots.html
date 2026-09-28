@@ -12,7 +12,7 @@
    seed = texture variation   posX/posY = move the lens (its centre) in frame   size = scale (1.0)
    snow = share of the hand that is bright (1 = solid dots like the tile; lower = mottled)   ring = lens rim brightness (0.40; lower = fainter, 0.22 = very faint)
    cut = dot brightness cutoff (0.55)
-   dc = dot colour hex, e.g. dc=ffffff
+   dot = dot size (0.85; 1 = original, lower = finer)   dc = dot colour hex, e.g. dc=ffffff
    Framed like the current 4:3 "Meet Compliance Requirements" tile: big faint lens left of centre, thumb + fingertips entering bottom-right.  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
 // opened directly (not in an iframe) -> show the tile's gradient so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
@@ -25,7 +25,8 @@ const CONFIG={ camX:num('camX',0), camY:num('camY',0), camZ:num('camZ',3.49),
   size:num('size',1.0) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
-const P={ spacing:10, minSize:2.6, maxSize:5.2, dotOpacity:0.62, threshold:0, softness:1,
+const DOT=num('dot',0.85);   // dot size + grid spacing scale (1 = the original mountain preset)
+const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:0.62, threshold:0, softness:1,
   brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
   chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
 const KEYGREEN=0x00ff00;
