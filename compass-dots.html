@@ -59,7 +59,7 @@ function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(
 
 /* ---- build the pocket compass, face-on like the reference (units: bezel outer radius ~1.04) ----
    Bright (dots): bail ring, thick bezel, case, dial. Dark (gaps): the recessed ring between bezel and dial, the needle's
-   north half and the W/E notches; the dial is otherwise plain and the crown is a simple blob, like the tile. The needle swings back and forth. */
+   wide middle and the N/E/S/W notches; the rose and fine ticks of the source are too light/thin to show, like the tile. The needle swings back and forth. */
 const compass=new THREE.Group(), parts=[];
 const add=(g,a,grp)=>{ const col=new Float32Array(g.attributes.position.count*3).fill(a); g.setAttribute('color',new THREE.BufferAttribute(col,3));
   const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; (grp||compass).add(m); return m; };
@@ -69,12 +69,19 @@ add(new THREE.TorusGeometry(0.92,0.12,24,120),BRIGHT);                          
 { const g=new THREE.CylinderGeometry(0.95,0.95,0.16,96,1); g.rotateX(Math.PI/2); g.translate(0,0,-0.10); add(g,BRIGHT*0.85); }   // case behind
 { const g=new THREE.RingGeometry(0.74,0.84,96,1); g.translate(0,0,-0.005); add(g,DARK); }            // recessed dark ring
 { const g=new THREE.CircleGeometry(0.74,96); add(g,DIAL); }                                         // dial face
-for(const sx of [-1,1]){ const g=new THREE.PlaneGeometry(0.16,0.035); g.translate(sx*0.62,0,0.005); add(g,DARK); }   // W / E notches (the only dial marks that show in the tile)
+// the dial's N/E/S/W pointers: small dark notches at the dial edge (the only dial marks that survive as dots)
+for(let k=0;k<4;k++){ const g=new THREE.PlaneGeometry(0.14,0.04); g.translate(0.64,0,0.005); g.rotateZ(k*Math.PI/2); add(g,DARK); }
+// needle: full-length diamond like the source (dark north half, grey south half). Its thin tips are narrower than a
+// dot cell, so in dots only the wide middle reads, as the short dark spindle in the tile.
 const needleG=new THREE.Group(); needleG.position.z=0.03; compass.add(needleG);
-{ const sh=new THREE.Shape(); sh.moveTo(0,0.60); sh.lineTo(0.06,0); sh.lineTo(-0.06,0); sh.lineTo(0,0.60);                // north half: narrow dark wedge
-  add(new THREE.ExtrudeGeometry(sh,{depth:0.03,bevelEnabled:false}),DARK,needleG);
-}
-{ const g=new THREE.SphereGeometry(0.11,20,14); g.scale(1.3,0.8,0.8); g.translate(0,1.10,0); add(g,BRIGHT); }   // simple crown on top (the tile shows just a small blob there)
+{ const n=new THREE.Shape(); n.moveTo(0,0.64); n.lineTo(0.09,0); n.lineTo(-0.09,0); n.lineTo(0,0.64);
+  add(new THREE.ExtrudeGeometry(n,{depth:0.03,bevelEnabled:false}),DARK,needleG);
+  const so=new THREE.Shape(); so.moveTo(0.09,0); so.lineTo(0,-0.64); so.lineTo(-0.09,0); so.lineTo(0.09,0);
+  add(new THREE.ExtrudeGeometry(so,{depth:0.03,bevelEnabled:false}),0.55,needleG); }
+{ const g=new THREE.CylinderGeometry(0.07,0.07,0.05,24); g.rotateX(Math.PI/2); g.translate(0,0,0.05); add(g,DARK,needleG); }   // hub
+// crown + bail ring on top, sized from the source (bail ~0.24 of the bezel radius, centred ~1.28 radii up)
+{ const g=new THREE.CylinderGeometry(0.095,0.095,0.14,24); g.translate(0,1.11,0); add(g,BRIGHT); }
+{ const g=new THREE.TorusGeometry(0.205,0.05,16,56); g.translate(0,1.36,0); add(g,BRIGHT); }
 tScene.add(compass);
 // fit exactly like the old video: 1280x720 stage, CSS cover + object-position, compass at (cx,cy) of the stage
 function place(){ const W=out.clientWidth||1, H=out.clientHeight||1, s=Math.max(W/1280,H/720);

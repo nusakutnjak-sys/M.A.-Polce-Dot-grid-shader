@@ -10,7 +10,7 @@
    camZ = zoom (bigger = further/smaller)   camY = camera height   tgtX/tgtY = look-at (nudge left-right / up-down)   fov = lens
    rot = spin speed per frame (0 = still)   spin0 = starting angle (rad)   sway = hand motion amount (0.2; 0 = still, 0.1 = subtle, 0.3 = lively)
    seed = texture variation   posX/posY = move the lens (its centre) in frame   size = scale (1.0)
-   snow = share of the hand that is bright (1 = solid dots like the tile; lower = mottled)   ring = lens rim brightness (0.40; lower = fainter, 0.22 = very faint)
+   snow = share of the hand that is bright (1 = solid dots like the tile; lower = mottled)   ring = lens rim brightness (0.32; lower = fainter, higher = more visible)
    cut = dot brightness cutoff (0.55)
    dot = dot size (0.72; 1 = original, lower = finer)   dc = dot colour hex, e.g. dc=ffffff
    Framed like the current 4:3 "Meet Compliance Requirements" tile: big faint lens left of centre, thumb + fingertips entering bottom-right.  */
@@ -20,7 +20,7 @@ let framed=true; try{ framed=window.self!==window.top; }catch(e){}
 if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='linear-gradient(130.796deg,#071231 0%,#0243a9 50%,#759ad0 100%) fixed';
 const CONFIG={ camX:num('camX',0), camY:num('camY',0), camZ:num('camZ',3.49),
   tgtX:num('tgtX',0), tgtY:num('tgtY',0), fov:num('fov',32),          // camZ 3.49 + fov 32 -> the frame is 2 units tall
-  posX:num('posX',-0.16), posY:num('posY',0.12),                     // lens centre in frame units (x: -1.33..1.33 at 4:3, y: -1..1)
+  posX:num('posX',-0.16), posY:num('posY',0.20),                     // lens centre in frame units (x: -1.33..1.33 at 4:3, y: -1..1)
   rot:num('rot',0), spin0:num('spin0',-0.28), sway:num('sway',0.2), seed:num('seed',1),
   size:num('size',1.0) };
 
@@ -77,7 +77,8 @@ tube([hp(0.98),hp(1.10),hp(1.20)], 0.12, 0.11, [[0.5,0.10]], false);            
 tube([hp(1.15),hp(1.6),hp(2.1),hp(2.55)], 0.10, 0.115, [], false);
 const NHANDLE=parts.length;   // handle parts are black (like the reference) -> no dots
 // back of the hand, thumb muscle and wrist (mostly off-frame, bottom-right)
-blob([2.60,-2.30,-0.36],[1.50,0.46,0.28],-0.96);  // side / back of the hand: ONE smooth strip parallel to the thumb (dark valley between), leaving the frame
+blob([2.60,-2.30,-0.36],[1.50,0.46,0.28],-0.96);  // side of the hand: a strip parallel to the thumb (dark valley between), leaving the frame
+blob([3.57,-2.29,-0.46],[1.30,0.40,0.26],-0.96);  // next strip over, its top stepping down (like the reference), leaving the frame
 tube([[2.75,-2.25,-0.36],[3.30,-2.95,-0.42],[3.9,-3.7,-0.5]], 0.72, 0.80, [], false);
 // fingers wrapping behind the handle: knuckle (behind, right) -> proximal -> PIP joint -> tip (poking out left)
 function finger(y, tipX, knX, r0, r1){
@@ -108,7 +109,7 @@ for(const g of geos){ const pos=g.attributes.position, nrm=g.attributes.normal, 
     SF[i]=0.22*(1-R)+0.36*F+0.32*G+0.10*up; sfv.push(SF[i]); }
   SFs.push(SF); }
 const hv=[]; for(let k=1;k<SFs.length;k++) for(const v of SFs[k]) hv.push(v); hv.sort((a,b)=>a-b);
-const SNOW=Math.min(1,num('snow',1)), SNOW_LO=SNOW>=1?-1e9:hv[Math.floor(hv.length*(1-SNOW))]-0.03, RING=num('ring',0.40);
+const SNOW=Math.min(1,num('snow',1)), SNOW_LO=SNOW>=1?-1e9:hv[Math.floor(hv.length*(1-SNOW))]-0.03, RING=num('ring',0.32);
 const skinTan=[0.06,0.043,0.028], skinMid=[0.03,0.021,0.014], skinDark=[0.008,0.006,0.005], white=[0.98,0.97,0.95]; // linear: darks = gaps, white = dots
 const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true});
 geos.forEach((g,gi)=>{ const pos=g.attributes.position, col=new Float32Array(pos.count*3), SF=SFs[gi];
@@ -121,7 +122,7 @@ geos.forEach((g,gi)=>{ const pos=g.attributes.position, col=new Float32Array(pos
     col[i*3]=c[0]; col[i*3+1]=c[1]; col[i*3+2]=c[2]; }
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
   const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; all.add(m); });
-const S=0.46*CONFIG.size;                      // lens radius ~0.25 of the frame height, like the tile
+const S=0.52*CONFIG.size;                      // lens radius ~0.28 of the frame height, centre ~39% down, like the tile
 all.scale.setScalar(S); all.position.set(CONFIG.posX,CONFIG.posY,0); all.rotation.y=CONFIG.spin0; tScene.add(all);
 let spinAcc=0; const T0=performance.now();
 function animate(){ const t=(performance.now()-T0)/1000, w=CONFIG.sway; spinAcc+=CONFIG.rot;   // hand-held motion: turn, tilt and drift (sway scales it all)
