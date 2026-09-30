@@ -28,6 +28,7 @@ const CONFIG={ camX:0, camY:0, camZ:3.49, tgtX:0, tgtY:0, fov:32,           // c
   swing:num('swing',0.2), sway:num('sway',0.03), spin0:0, seed:num('seed',1) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
+const FIXH=num('fixh',1023);   // dots are sized as if the frame were 1023 CSS px tall (the footer compass box at desktop) -> same dot size on every hero
 const DOT=num('dot',0.62);   // dot size + grid spacing scale (0.62 = hero size)
 const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.62), threshold:0, softness:1,
   brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
@@ -143,7 +144,7 @@ function frame(){ if(!running){requestAnimationFrame(frame);return;} resize();
   animate(); three.render(tScene,tCam);
   gl.viewport(0,0,RW,RH); gl.useProgram(prog);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src);
-  const ds=RH/P.refH;   // dots scale with height, like the camera (vertical FOV) -> same dot density on the compass at any aspect
+  const ds=(FIXH>0 ? FIXH*Math.min(devicePixelRatio||1,2) : RH)/P.refH;   // fixed dot size (same px as the footer compass at 1023px tall), whatever the section height; ?fixh=0 = scale with height again
   gl.uniform1i(U('uSrc'),0); gl.uniform2f(U('uRes'),RW,RH); gl.uniform1f(U('uCell'),Math.max(2,P.spacing)*ds);
   gl.uniform1f(U('uMinSize'),P.minSize*ds); gl.uniform1f(U('uMaxSize'),P.maxSize*ds); gl.uniform1f(U('uDotOpacity'),P.dotOpacity);
   gl.uniform3f(U('uDotColor'),P.dotColor[0],P.dotColor[1],P.dotColor[2]);
