@@ -1,0 +1,91 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Dot Road</title>
+<style>html,body{margin:0;height:100%;background:transparent}#out{position:fixed;inset:0;width:100%;height:100%;display:block}</style>
+</head><body>
+<canvas id="out"></canvas>
+<script>
+/* ===================== STATIC ROAD, SAME DOT SHADER =====================
+   A winding road (traced from the reference image) drawn flat into the hidden source canvas on green, then run through
+   the exact same dot-grid shader as the other pages. It's static: it only redraws when the section resizes.
+   Override in the iframe URL, e.g.  road-dots.html?x0=0.12&x1=0.88&width=0.19&dc=2f86dc
+   x0/x1 = left/right edge of the road's box (share of the width; 0.14 / 0.87)   y0/y1 = top/bottom (share of the height; -0.04 / 0.92)
+   width = road width (share of the height; 0.17)   fade = how much of each end fades out (share of the length; 0.30)
+   dashes = 0 hides the centre dashes   cut = dot brightness cutoff (0.55)
+   dot = dot size (0.72 = same as the other pages)   dc = dot colour hex (3d8fe0 = the light blue of the reference)   op = dot opacity (0.62)
+   Made to sit behind the whole "Our process" section (iframe filling the section, content on top).  */
+const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+// opened directly (not in an iframe) -> show the section's light grey so the dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
+let framed=true; try{ framed=window.self!==window.top; }catch(e){}
+if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='#f0f1f3';
+const CFG={ x0:num('x0',0.14), x1:num('x1',0.87), y0:num('y0',-0.04), y1:num('y1',0.92), width:num('width',0.17), fade:num('fade',0.30), dashes:Q.get('dashes')!=='0' };
+
+/* ===================== baked dot-style params (your preset) ===================== */
+const DOT=num('dot',0.72);   // dot size + grid spacing scale (1 = the original mountain preset; 0.72 = same as the other pages)
+const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.62), threshold:0, softness:1,
+  brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
+  chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'3d8fe0').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
+
+/* ===================== road -> hidden source canvas (on green) ===================== */
+// centreline traced from the reference road image (2000x1125), normalised to 0..1
+const PATH=[[0,.124],[.05,.169],[.095,.231],[.125,.302],[.1375,.40],[.1275,.498],[.125,.587],[.1375,.684],[.17,.747],[.235,.782],[.325,.764],[.425,.72],[.525,.689],[.625,.68],[.71,.702],[.78,.756],[.85,.844],[.91,.889],[.975,.862],[1,.844]];
+const src=document.createElement('canvas'), sx=src.getContext('2d');
+function catmull(p,n){ const out=[]; for(let i=0;i<p.length-1;i++){ const p0=p[Math.max(0,i-1)],p1=p[i],p2=p[i+1],p3=p[Math.min(p.length-1,i+2)];
+  for(let k=0;k<n;k++){ const t=k/n,t2=t*t,t3=t2*t; out.push([0,1].map(j=>0.5*((2*p1[j])+(-p0[j]+p2[j])*t+(2*p0[j]-5*p1[j]+4*p2[j]-p3[j])*t2+(-p0[j]+3*p1[j]-3*p2[j]+p3[j])*t3))); } }
+  out.push(p[p.length-1]); return out; }
+const SMOOTH=catmull(PATH,24);
+function drawSource(W,H){ src.width=W; src.height=H; sx.fillStyle='#00ff00'; sx.fillRect(0,0,W,H);
+  const pts=SMOOTH.map(([u,v])=>[ (CFG.x0+(CFG.x1-CFG.x0)*u)*W, (CFG.y0+(CFG.y1-CFG.y0)*v)*H ]);
+  let L=[0]; for(let i=1;i<pts.length;i++) L.push(L[i-1]+Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1])); const TOT=L[L.length-1];
+  const RW_=CFG.width*H, fade=s=>{ const f=CFG.fade*TOT; return Math.max(0,Math.min(1,s/f,(TOT-s)/f)); };   // linear ramp at both ends
+  sx.lineCap='round'; sx.lineJoin='round';
+  // road body: brightness follows the end fades -> big dots in the middle, shrinking and thinning out to nothing at both
+  // ends (the tone just drops below the dot cutoff; no hard cut). Drawn as short overlapping segments along the path.
+  sx.lineWidth=RW_; sx.lineCap='butt';   // flat ends: round caps of later segments would paint over the faded ends
+  for(let i=1;i<pts.length;i++){ const g=Math.round(255*(0.50+0.50*Math.pow(fade(L[i]),0.8)));   // mapped onto the visible dot range: dots shrink along the tails
+    sx.strokeStyle='rgb('+g+','+g+','+g+')'; sx.beginPath(); sx.moveTo(pts[i-1][0],pts[i-1][1]); sx.lineTo(pts[i][0],pts[i][1]); sx.stroke(); }
+  // centre dashes: dark -> gaps in the dots
+  if(CFG.dashes){ sx.strokeStyle='#101010'; sx.lineWidth=Math.max(2,RW_*0.06); sx.lineCap='butt'; sx.setLineDash([RW_*0.22,RW_*0.30]);
+    sx.beginPath(); sx.moveTo(pts[0][0],pts[0][1]); for(let i=1;i<pts.length;i++) sx.lineTo(pts[i][0],pts[i][1]); sx.stroke(); sx.setLineDash([]); } }
+
+/* ===================== dot-grid shader (transparent output) ===================== */
+const out=document.getElementById('out');
+const gl=out.getContext('webgl',{premultipliedAlpha:true,alpha:true,antialias:false});
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+const VS='attribute vec2 aPos;varying vec2 vUv;void main(){vUv=aPos*0.5+0.5;gl_Position=vec4(aPos,0.,1.);}';
+const FS=['precision highp float;varying vec2 vUv;uniform sampler2D uSrc;uniform vec2 uRes;uniform float uCell;',
+'uniform float uMinSize,uMaxSize,uDotOpacity;uniform vec3 uDotColor;uniform float uBrightness,uContrast,uGamma,uInvert,uThreshold,uSoftness;',
+'uniform float uCutoff,uCutoffSoft,uInvertMask,uShaderOpacity,uChroma,uChromaThresh,uChromaSoft;uniform vec3 uChromaColor;',
+'float luma(vec3 c){return dot(c,vec3(0.299,0.587,0.114));}',
+'void main(){vec2 fp=vUv*uRes;vec2 cell=floor(fp/uCell);vec2 ctr=(cell+0.5)*uCell;vec3 rgb=texture2D(uSrc,ctr/uRes).rgb;float rawL=luma(rgb);',
+'float mask=smoothstep(uCutoff,uCutoff+max(uCutoffSoft,0.001),rawL);if(uInvertMask>0.5)mask=1.0-mask;',
+'if(uChroma>0.5){float ky=luma(uChromaColor);vec2 kc=vec2(uChromaColor.b-ky,uChromaColor.r-ky);float py=luma(rgb);vec2 pc=vec2(rgb.b-py,rgb.r-py);mask*=smoothstep(uChromaThresh,uChromaThresh+max(uChromaSoft,0.001),distance(pc,kc));}',
+'float L=rawL;L+=uBrightness;L=(L-0.5)*uContrast+0.5;L=clamp(L,0.,1.);L=pow(L,1.0/uGamma);if(uInvert>0.5)L=1.0-L;',
+'float dv=smoothstep(uThreshold,uThreshold+max(uSoftness,0.001),L);',
+'float hc=uCell*0.5;float rad=min(mix(uMinSize,uMaxSize,dv)*0.5,hc);float d=distance(fp,ctr);float cov=1.0-smoothstep(rad-1.0,rad+1.0,d);',
+'float a=cov*uDotOpacity*mask*uShaderOpacity;gl_FragColor=vec4(uDotColor*a,a);}'].join('\n');
+function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(x));return x;}
+const prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(prog);gl.useProgram(prog);
+const quad=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const loc=gl.getAttribLocation(prog,'aPos');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+const U=n=>gl.getUniformLocation(prog,n); let RW=0,RH=0;
+let running=true, dirty=true;
+function resize(){const dpr=Math.min(devicePixelRatio||1,2);const w=Math.max(2,Math.round(out.clientWidth*dpr)),h=Math.max(2,Math.round(out.clientHeight*dpr));if(w===RW&&h===RH)return;RW=w;RH=h;out.width=w;out.height=h;dirty=true;}
+function frame(){ resize(); if(dirty&&running){ dirty=false; drawSource(RW,RH);
+  gl.viewport(0,0,RW,RH); gl.useProgram(prog);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src);
+  const ds=RH/P.refH;   // dots scale with height, like the camera (vertical FOV) -> same dot density on the mountain at any aspect
+  gl.uniform1i(U('uSrc'),0); gl.uniform2f(U('uRes'),RW,RH); gl.uniform1f(U('uCell'),Math.max(2,P.spacing)*ds);
+  gl.uniform1f(U('uMinSize'),P.minSize*ds); gl.uniform1f(U('uMaxSize'),P.maxSize*ds); gl.uniform1f(U('uDotOpacity'),P.dotOpacity);
+  gl.uniform3f(U('uDotColor'),P.dotColor[0],P.dotColor[1],P.dotColor[2]);
+  gl.uniform1f(U('uBrightness'),P.brightness); gl.uniform1f(U('uContrast'),P.contrast); gl.uniform1f(U('uGamma'),Math.max(0.01,P.gamma));
+  gl.uniform1f(U('uInvert'),P.invert); gl.uniform1f(U('uThreshold'),P.threshold); gl.uniform1f(U('uSoftness'),P.softness);
+  gl.uniform1f(U('uCutoff'),P.cutoff); gl.uniform1f(U('uCutoffSoft'),P.cutoffSoft); gl.uniform1f(U('uInvertMask'),P.invertMask);
+  gl.uniform1f(U('uShaderOpacity'),P.shaderOpacity); gl.uniform1f(U('uChroma'),P.chroma);
+  gl.uniform3f(U('uChromaColor'),P.chromaColor[0],P.chromaColor[1],P.chromaColor[2]); gl.uniform1f(U('uChromaThresh'),P.chromaThresh); gl.uniform1f(U('uChromaSoft'),P.chromaSoft);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES,0,3);
+  } requestAnimationFrame(frame); }   // static: only redraws when the size changes
+if('IntersectionObserver' in window){ new IntersectionObserver(es=>{running=es[0].isIntersecting; if(running) dirty=true;}).observe(out); }
+resize(); requestAnimationFrame(frame);
+</script></body></html>
