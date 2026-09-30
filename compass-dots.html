@@ -15,7 +15,7 @@
    marks = 0 hides the painted dial markings (ticks, rose)   letters = 1 adds the N/E/S/W letters   rose = 1 adds the light compass rose   south = south needle tone (0.03 = same dark as north: one clean diamond; ~0.33 = lighter tail)   metal = bezel/case/bail brightness (0.56)   face = dial brightness (0.52)
    swing = needle swing (rad, 0.2; 0 = still)   sway = gentle wobble of the whole compass (rad, 0.03)
    seed = texture variation   cut = dot brightness cutoff (0.55)   grad = 1 paints the old video's gradient inside the iframe
-   dot = dot size (0.72 = same as the hero pages)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)  */
+   dot = dot size (0.62 = hero size; cards use 0.72)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
 // the gradient baked into the old footer video (sampled from compass-footer-v3.mp4): light grey -> blue -> navy
 const GRAD='linear-gradient(#ecf1f2 0%,#d0e1ef 6%,#b0cfec 12%,#87b9e9 20%,#539de5 30%,#2182e2 40%,#0769c9 50%,#0953a4 60%,#093c7b 70%,#0a2754 80%,#0b0f2c 90%,#0b0f2c 100%)';
@@ -28,7 +28,7 @@ const CONFIG={ camX:0, camY:0, camZ:3.49, tgtX:0, tgtY:0, fov:32,           // c
   swing:num('swing',0.2), sway:num('sway',0.03), spin0:0, seed:num('seed',1) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
-const DOT=num('dot',0.72);   // dot size + grid spacing scale (0.72 = same as the hero pages)
+const DOT=num('dot',0.62);   // dot size + grid spacing scale (0.62 = hero size)
 const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.62), threshold:0, softness:1,
   brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
   chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame

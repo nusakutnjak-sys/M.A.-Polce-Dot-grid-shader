@@ -11,7 +11,7 @@
    spin = rotation speed around the gear's axle (rad per second, 0.35; 0 = still)   spin0 = starting angle (rad)
    tiltX / tiltY = how the gear face is tipped toward the camera (rad; like the reference: face up-right, lower teeth show their sides)
    seed = texture variation   posX/posY = move the gear in frame   size = scale (1.0 = ~30% of the hero height, centred under the copy)
-   cut = dot brightness cutoff (0.55)   dot = dot size (0.72 = same as the other hero pages)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)
+   cut = dot brightness cutoff (0.55)   dot = dot size (0.62 = hero size; cards use 0.72)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)
    Framed for a hero section: gear small and low, centred under the headline + copy (like the services hero).  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
 // opened directly (not in an iframe) -> show the hero gradient (same as book / globe) so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
@@ -24,7 +24,7 @@ const CONFIG={ camX:num('camX',0), camY:num('camY',0), camZ:num('camZ',3.49),
   size:num('size',1.0) };
 
 /* ===================== baked dot-style params (your preset) ===================== */
-const DOT=num('dot',0.72);   // dot size + grid spacing scale (1 = the original mountain preset; 0.72 = same as the other pages)
+const DOT=num('dot',0.62);   // dot size + grid spacing scale (0.62 = hero size; 1 = the original mountain preset)
 const P={ spacing:10*DOT, minSize:2.6*DOT, maxSize:5.2*DOT, dotOpacity:num('op',0.62), threshold:0, softness:1,
   brightness:0.0, contrast:1.8, gamma:0.6, invert:0, cutoff:num('cut',0.55), cutoffSoft:0.1, invertMask:0,
   chroma:1, chromaColor:[0,1,0], chromaThresh:0.28, chromaSoft:0.12, dotColor:(Q.get('dc')||'ffffff').match(/../g).map(h=>parseInt(h,16)/255), shaderOpacity:1, refH:1200 };   // dot sizes are in px at a 1200px-tall frame
