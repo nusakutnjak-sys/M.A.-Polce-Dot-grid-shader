@@ -16,6 +16,14 @@
    wave = 1 also paints the tile's pale-blue bottom wave inside the iframe (default 0: transparent, the wave is page CSS)
    Framed for the white "Protect the Business" tile: lock centred, ~46% of the tile height.  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+
+/* ===================== hover mode (added for the site's service tiles) =====================
+   hover=1 starts still; the page then plays on {dots:'play'} and holds on {dots:'pause'}
+   (postMessage from the tile). The animation clock only runs while playing, so motion
+   resumes where it stopped. t0 = seconds already "played" before the still frame.  */
+const __pn=performance.now.bind(performance); let __held=Q.get('hover')==='1', __acc=num('t0',0)*1000, __last=__pn();
+function __now(){ const n=__pn(); if(!__held) __acc+=n-__last; __last=n; return __acc; }
+window.addEventListener('message',e=>{ const d=e.data&&e.data.dots; if(d==='play') __held=false; else if(d==='pause') __held=true; });
 // the tile's background: white with a pale-blue diagonal wave along the bottom (baked into the old video)
 const WAVE='linear-gradient(166deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 60%,rgba(229,239,246,.9) 78%,#c6ddee 100%)';
 // opened directly (not in an iframe) -> show the tile's white + wave so the cyan dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
@@ -88,8 +96,8 @@ parts.forEach(({g,kind},pi)=>{ const pos=g.attributes.position, col=new Float32A
 // frame like the tile: lock ~0.92 of the 2-unit frame height, centred a little below the middle
 const TOP=BHGT+LEG+SR+ST, S=0.92/TOP*CONFIG.size;
 lock.scale.setScalar(S); lock.position.set(CONFIG.posX, -0.16-TOP*S/2+CONFIG.posY, 0); lock.rotation.y=CONFIG.spin0; tScene.add(lock);
-let lastT=performance.now();
-function animate(){ const now=performance.now(), dt=Math.min(0.1,(now-lastT)/1000); lastT=now;   // time-based: same speed on 60/120 Hz screens
+let lastT=__now();
+function animate(){ const now=__now(), dt=Math.min(0.1,(now-lastT)/1000); lastT=now;   // time-based: same speed on 60/120 Hz screens
   lock.rotation.y+=CONFIG.rot*dt*60; }
 
 /* ===================== dot-grid shader (transparent output) ===================== */
