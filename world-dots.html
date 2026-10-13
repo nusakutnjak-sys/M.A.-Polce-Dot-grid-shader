@@ -15,6 +15,14 @@
    dot = dot size (0.72 = same as the other pages)   dc = dot colour hex (0a5fa3 = the tile's blue)   op = dot opacity (0.85)
    Framed for the white "Plan What Comes Next" tile: whole globe, centred a little below the middle.                                 */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+
+/* ===================== hover mode (added for the site's service tiles) =====================
+   hover=1 starts still; the page then plays on {dots:'play'} and holds on {dots:'pause'}
+   (postMessage from the tile). The animation clock only runs while playing, so motion
+   resumes where it stopped. t0 = seconds already "played" before the still frame.  */
+const __pn=performance.now.bind(performance); let __held=Q.get('hover')==='1', __acc=num('t0',0)*1000, __last=__pn();
+function __now(){ const n=__pn(); if(!__held) __acc+=n-__last; __last=n; return __acc; }
+window.addEventListener('message',e=>{ const d=e.data&&e.data.dots; if(d==='play') __held=false; else if(d==='pause') __held=true; });
 // opened directly (not in an iframe) -> show the tile's white so the blue dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
 let framed=true; try{ framed=window.self!==window.top; }catch(e){}
 if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='#fff';
@@ -93,9 +101,9 @@ img.onload=()=>{ const W=1024,Hh=512, c=document.createElement('canvas'); c.widt
   buildGlobe((u,v)=>{ const fx=u*W-0.5, fy=(1-v)*Hh-0.5, x0=Math.floor(fx), y0=Math.floor(fy), tx=fx-x0, ty=fy-y0;   // bilinear
     return (at(x0,y0)*(1-tx)+at(x0+1,y0)*tx)*(1-ty)+(at(x0,y0+1)*(1-tx)+at(x0+1,y0+1)*tx)*ty; }); };
 img.onerror=()=>buildGlobe((u,v)=>{ const th=u*6.2832, ph=v*3.1416; return ss(0.5,0.56,fbm(Math.cos(th)*Math.sin(ph)*2+5,Math.cos(ph)*2,Math.sin(th)*Math.sin(ph)*2)); });
-img.src='https://cdn.jsdelivr.net/npm/three-globe@2.45.2/example/img/earth-water.png';
-let lastT=performance.now();
-function animate(){ const now=performance.now(), dt=Math.min(0.1,(now-lastT)/1000); lastT=now;   // time-based: same speed on 60/120 Hz screens
+img.src='earth-water-1024.png';
+let lastT=__now();
+function animate(){ const now=__now(), dt=Math.min(0.1,(now-lastT)/1000); lastT=now;   // time-based: same speed on 60/120 Hz screens
   if(globe) globe.rotation.y+=CONFIG.spin*dt; }
 
 /* ===================== dot-grid shader (transparent output) ===================== */

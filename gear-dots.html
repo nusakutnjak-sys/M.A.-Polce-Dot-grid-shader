@@ -128,5 +128,8 @@ function frame(){ if(!running){requestAnimationFrame(frame);return;} resize();
   requestAnimationFrame(frame);
 }
 if('IntersectionObserver' in window){ new IntersectionObserver(es=>{running=es[0].isIntersecting;}).observe(out); }
+/* ===================== still mode (added for the site: reduced motion) =====================
+   still=1 draws the first pose once, then stops all motion. */
+if(Q.get('still')==='1'){ const __anim=animate; let __done=false; animate=function(){ if(!__done){ __done=true; __anim(); } }; }
 resize(); requestAnimationFrame(frame);
 </script></body></html>

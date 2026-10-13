@@ -15,6 +15,14 @@
    dot = dot size (0.72; 1 = original, lower = finer)   dc = dot colour hex, e.g. dc=ffffff
    Framed like the current 4:3 "Meet Compliance Requirements" tile: big faint lens left of centre, thumb + fingertips entering bottom-right.  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+
+/* ===================== hover mode (added for the site's service tiles) =====================
+   hover=1 starts still; the page then plays on {dots:'play'} and holds on {dots:'pause'}
+   (postMessage from the tile). The animation clock only runs while playing, so motion
+   resumes where it stopped. t0 = seconds already "played" before the still frame.  */
+const __pn=performance.now.bind(performance); let __held=Q.get('hover')==='1', __acc=num('t0',0)*1000, __last=__pn();
+function __now(){ const n=__pn(); if(!__held) __acc+=n-__last; __last=n; return __acc; }
+window.addEventListener('message',e=>{ const d=e.data&&e.data.dots; if(d==='play') __held=false; else if(d==='pause') __held=true; });
 // opened directly (not in an iframe) -> show the tile's gradient so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
 let framed=true; try{ framed=window.self!==window.top; }catch(e){}
 if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='linear-gradient(130.796deg,#071231 0%,#0243a9 50%,#759ad0 100%) fixed';
@@ -123,8 +131,8 @@ geos.forEach((g,gi)=>{ const pos=g.attributes.position, col=new Float32Array(pos
   const m=new THREE.Mesh(g,mat); m.castShadow=false; m.receiveShadow=false; all.add(m); });   // no cast shadows: they made messy dark patches on the hand; the edge darkening already separates the fingers
 const S=0.52*CONFIG.size;                      // lens radius ~0.28 of the frame height, centre ~39% down, like the tile
 all.scale.setScalar(S); all.position.set(CONFIG.posX,CONFIG.posY,0); all.rotation.y=CONFIG.spin0; tScene.add(all);
-let spinAcc=0; const T0=performance.now();
-function animate(){ const t=(performance.now()-T0)/1000, w=CONFIG.sway; spinAcc+=CONFIG.rot;   // hand-held motion: turn, tilt and drift (sway scales it all)
+let spinAcc=0; const T0=0;   // the hover clock starts at the t0 head start, so time is measured from 0
+function animate(){ const t=(__now()-T0)/1000, w=CONFIG.sway; spinAcc+=CONFIG.rot;   // hand-held motion: turn, tilt and drift (sway scales it all)
   all.rotation.y=CONFIG.spin0+spinAcc+w*Math.sin(t*0.70);
   all.rotation.x=w*0.70*Math.sin(t*0.53+1.1);
   all.rotation.z=w*0.28*Math.sin(t*0.61+0.4);

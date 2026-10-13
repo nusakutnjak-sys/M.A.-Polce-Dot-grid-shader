@@ -15,6 +15,14 @@
    cut = dot brightness cutoff (0.55)   dot = dot size (0.72 = same as the other pages)   dc = dot colour hex (ffffff)   op = dot opacity (0.62)
    Framed for the blue "Make Our IT Work Better" tile: cube a little below the middle, ~45% of the tile height.  */
 const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFloat(Q.get(k));return isNaN(v)?d:v;};
+
+/* ===================== hover mode (added for the site's service tiles) =====================
+   hover=1 starts still; the page then plays on {dots:'play'} and holds on {dots:'pause'}
+   (postMessage from the tile). The animation clock only runs while playing, so motion
+   resumes where it stopped. t0 = seconds already "played" before the still frame.  */
+const __pn=performance.now.bind(performance); let __held=Q.get('hover')==='1', __acc=num('t0',0)*1000, __last=__pn();
+function __now(){ const n=__pn(); if(!__held) __acc+=n-__last; __last=n; return __acc; }
+window.addEventListener('message',e=>{ const d=e.data&&e.data.dots; if(d==='play') __held=false; else if(d==='pause') __held=true; });
 // opened directly (not in an iframe) -> show the tile's blue so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
 let framed=true; try{ framed=window.self!==window.top; }catch(e){}
 if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='#0672d2';
@@ -82,8 +90,8 @@ const tiltG=new THREE.Group(); tiltG.add(cube); tiltG.rotation.x=CONFIG.tilt;   
 const EDGE=0.56*CONFIG.size; tiltG.scale.setScalar(EDGE); tiltG.position.set(CONFIG.posX,-0.30+CONFIG.posY,0); tScene.add(tiltG);
 cube.rotation.y=CONFIG.spin0;
 const easeIO=t=>t<0.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
-const T0=performance.now();
-function animate(){ const t=(performance.now()-T0)/1000;                                    // quarter turn, rest corner-on, repeat
+const T0=0;   // the hover clock starts at the t0 head start, so time is measured from 0
+function animate(){ const t=(__now()-T0)/1000;                                    // quarter turn, rest corner-on, repeat
   const cyc=CONFIG.turn+CONFIG.hold, k=Math.floor(t/cyc), f=Math.min(1,(t-k*cyc)/Math.max(0.01,CONFIG.turn));
   cube.rotation.y=CONFIG.spin0+(k+(CONFIG.hold>0?easeIO(f):f))*Math.PI/2; }
 
