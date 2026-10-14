@@ -138,9 +138,14 @@ function resize(){const dpr=Math.min(devicePixelRatio||1,2);const w=Math.max(2,M
 /* ===================== render loop: capped frame rate, runs only while visible ===================== */
 const STEP=1000/FPS, STILL=Q.get('still')==='1';
 let running=true, looping=false, last=0, drawn=false;
+// too-slow guard: when this device draws well under 15 fps (no GPU, a very weak phone), stop animating and keep
+// the current frame. The first gap (shader compile) and pauses over 1 s are ignored; ?guard=0 turns it off.
+const GUARD=Q.get('guard')!=='0'; let slow=false, gaps=[], skipGap=true;
 function frame(t){ if(!running){looping=false;return;} requestAnimationFrame(frame);
   if(last && t-last<STEP-2) return;
-  const sized=resize(); if((STILL || __held) && drawn && !sized) return;   // still mode, or a hover tile held still: draw again only after a resize
+  const sized=resize(); if((STILL || slow || __held) && drawn && !sized) return;   // still mode, too slow, or a hover tile held still: draw again only after a resize
+  if(GUARD && !slow && drawn && last){ const g=t-last;
+    if(skipGap) skipGap=false; else if(g<1000){ gaps.push(g); if(gaps.length===4){ gaps.sort((a,b)=>a-b); slow=gaps[2]>66; gaps=[]; } } }
   const dt=last ? Math.min(t-last,100) : STEP; last=t;
   animate(dt);
   three.setRenderTarget(rt); three.render(tScene,tCam);
