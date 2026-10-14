@@ -77,7 +77,9 @@ const SPURS=[ // x, z, height, slope, stretch along its own axis, axis angle
   [ 0.10,-0.52, 1.10, 1.35, 1.9, 0.5],   // big back shoulder -> subsidiary summit on one side
   [-0.30, 0.50, 0.92, 1.45, 1.6,-0.7],   // lower front spur on the other side
   [ 0.55,-0.95, 0.62, 1.30, 1.5, 0.2] ];
-function sideVar(x){ return 1+0.9*(fbm(x*2.3+3.1,0.7,1.3)-0.5) + 0.35*(fbm(x*6.5+1.7,2.1,0.4)-0.5); } // side slope varies along the ridge -> kinked side silhouette
+const SVC=new Map();   // sideVar depends only on x, and the terrain grid repeats each x on every row
+function sideVar(x){ let v=SVC.get(x); if(v===undefined){ v=sideVar0(x); SVC.set(x,v); } return v; }
+function sideVar0(x){ return 1+0.9*(fbm(x*2.3+3.1,0.7,1.3)-0.5) + 0.35*(fbm(x*6.5+1.7,2.1,0.4)-0.5); } // side slope varies along the ridge -> kinked side silhouette
 // lateral warp: breaks the side flanks into steps/bumps/notches; the crest (zf=0) still exists, so the front skyline is unchanged
 function warpZ(x,z){ return 0.30*(fbm(x*2.0+1.3, z*2.4+4.1, 0.3)-0.5) + 0.12*(fbm(x*5.5+7.7, z*6.0+2.2, 1.9)-0.5); }
 function massif(x,z){ let best=0; const zf=z-crestZ(x)+warpZ(x,z), az=(zf>0?AZF:AZB)*sideVar(x), zz=(az*zf)*(az*zf), reach=H/KX;
@@ -96,8 +98,47 @@ function relief(nx,nz,u){
   return ridgedMF(wx, u*1.7, wz);
 }
 function spurs(nx,nz){ return ridgedMF(nx*0.85, 3.3, nz*0.85); } // few big radiating ridges / secondary summits
+// runs fn(i) for every vertex in slices of ~12ms, so the build never blocks the page in one long task
+async function eachVertex(n,fn){ let t=performance.now(); for(let i=0;i<n;i++){ fn(i); if((i&255)===255 && performance.now()-t>12){ await new Promise(r=>setTimeout(r,0)); t=performance.now(); } } }
+// pre-computed terrain (peak-terrain.bin.gz: heights + colours for the default seed and snow), so the page
+// does not spend seconds on noise maths; any other ?seed / ?snow, or a failed load, computes it as before.
+// After changing the terrain code, open peak-dots.html?bake=1 and replace peak-terrain.bin.gz with the downloaded file.
+async function loadTerrain(){
+  if(Q.get('seed')!==null || Q.get('snow')!==null || Q.get('bake')==='1') return null;
+  try{
+    const r=await fetch('peak-terrain.bin.gz'); if(!r.ok) return null;
+    let buf=await r.arrayBuffer(), dv=new DataView(buf);
+    if(dv.getUint32(0,true)!==0x31544b50){   // not "PKT1" yet -> still gzipped
+      if(typeof DecompressionStream==='undefined') return null;
+      buf=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); dv=new DataView(buf); }
+    const n=pos.count;
+    if(dv.getUint32(0,true)!==0x31544b50 || dv.getUint32(4,true)!==n || buf.byteLength!==16+n*5) return null;
+    const y0=dv.getFloat32(8,true), y1=dv.getFloat32(12,true), Y=new Float32Array(n), C=new Float32Array(n*3), o=16+n*2;
+    for(let i=0;i<n;i++) Y[i]=y0+(y1-y0)*dv.getUint16(16+i*2,true)/65535;
+    for(let i=0;i<n*3;i++) C[i]=dv.getUint8(o+i)/255;
+    return {Y,C};
+  }catch(e){ return null; }
+}
+// ?bake=1: download the computed terrain as peak-terrain.bin.gz (format PKT1: n, y range, Uint16 heights, Uint8 RGB colours)
+async function bakeTerrain(col){
+  const n=pos.count; let y0=Infinity,y1=-Infinity; for(let i=0;i<n;i++){ const y=pos.getY(i); if(y<y0)y0=y; if(y>y1)y1=y; }
+  const buf=new ArrayBuffer(16+n*5), dv=new DataView(buf), o=16+n*2;
+  dv.setUint32(0,0x31544b50,true); dv.setUint32(4,n,true); dv.setFloat32(8,y0,true); dv.setFloat32(12,y1,true);
+  for(let i=0;i<n;i++) dv.setUint16(16+i*2,Math.max(0,Math.min(65535,Math.round((pos.getY(i)-y0)/(y1-y0)*65535))),true);
+  for(let i=0;i<n*3;i++) dv.setUint8(o+i,Math.max(0,Math.min(255,Math.round(col[i]*255))));
+  const gz=await new Response(new Blob([buf]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+  const a=document.createElement('a'); a.href=URL.createObjectURL(gz); a.download='peak-terrain.bin.gz'; document.body.appendChild(a); a.click(); a.remove();
+}
+let peak=null;
+async function buildPeak(){
+const T=await loadTerrain();
+if(T){
+  for(let i=0;i<pos.count;i++) pos.setY(i,T.Y[i]);
+  geo.computeVertexNormals();
+  geo.setAttribute('color', new THREE.BufferAttribute(T.C,3));
+} else {
 const HT=new Float32Array(pos.count);   // base heights (0 = ground)
-for(let i=0;i<pos.count;i++){
+await eachVertex(pos.count,i=>{
   V.fromBufferAttribute(pos,i);
   let h=massif(V.x,V.z);
   if(h>0.002){
@@ -109,27 +150,26 @@ for(let i=0;i<pos.count;i++){
   }
   HT[i]=h; V.y = h>0.002 ? h : -0.02;
   pos.setXYZ(i,V.x,V.y,V.z);
-}
+});
 geo.computeVertexNormals();
 
 /* ---- vertex colours: tan rock ridges, dark crevices, white snow couloirs ---- */
 const nrm=geo.attributes.normal, col=[];
 // snow field value per vertex; threshold picked so snow covers a fixed share of the rock (URL ?snow=0.45)
-const SF=new Float32Array(pos.count), sfv=[];
-for(let i=0;i<pos.count;i++){ if(HT[i]<=0.002) continue; V.fromBufferAttribute(pos,i);
-  const u=Math.min(1,HT[i]/H), th=Math.atan2(V.z,V.x), R=relief(Math.cos(th),Math.sin(th),u), up=Math.max(0,nrm.getY(i));
+const SF=new Float32Array(pos.count), RS=new Float64Array(pos.count), sfv=[];   // RS = relief per vertex (full precision), reused by the colour pass
+await eachVertex(pos.count,i=>{ if(HT[i]<=0.002) return; V.fromBufferAttribute(pos,i);
+  const u=Math.min(1,HT[i]/H), th=Math.atan2(V.z,V.x), R=relief(Math.cos(th),Math.sin(th),u), up=Math.max(0,nrm.getY(i)); RS[i]=R;
   const F=fbm(V.x*7.0+2, HT[i]*6.0, V.z*7.0+9), G=fbm(V.x*15.0+5, HT[i]*13.0, V.z*15.0+1);
-  SF[i]=0.22*(1-R) + 0.36*F + 0.32*G + 0.10*up; sfv.push(SF[i]); }
+  SF[i]=0.22*(1-R) + 0.36*F + 0.32*G + 0.10*up; sfv.push(SF[i]); });
 sfv.sort((a,b)=>a-b); const SNOW_LO=sfv[Math.floor(sfv.length*(1-num('snow',0.58)))]-0.03;
 const rockTan=[0.14,0.10,0.065], rockMid=[0.05,0.035,0.024], rockDark=[0.008,0.006,0.005], snow=[0.98,0.97,0.95]; // linear: dark rock = gaps, snow = dots
 function ss(e0,e1,x){x=Math.max(0,Math.min(1,(x-e0)/(e1-e0)));return x*x*(3-2*x);}
 function mix(a,b,t){t=Math.max(0,Math.min(1,t));return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
-for(let i=0;i<pos.count;i++){
+await eachVertex(pos.count,i=>{
   V.fromBufferAttribute(pos,i);
-  if(HT[i]<=0.002){ col.push(0,0,0); continue; }            // ground = black -> below the cutoff -> no dots
+  if(HT[i]<=0.002){ col.push(0,0,0); return; }            // ground = black -> below the cutoff -> no dots
   const u=Math.max(0,Math.min(1,HT[i]/H));
-  const th=Math.atan2(V.z,V.x), nx=Math.cos(th), nz=Math.sin(th), up=Math.max(0,nrm.getY(i));
-  const R=relief(nx,nz,u);
+  const R=RS[i];   // same relief the snow pass computed for this vertex
   let c=mix(rockDark, rockTan, ss(0.2,0.72, R));           // ridges lighter, crevices dark
   c=mix(c, rockMid, ss(0.5,0.15, R)*0.35);
   // snow patches: couloirs (low relief) + blotchy fields + up-facing ledges -> ~half the surface, like the reference
@@ -137,14 +177,18 @@ for(let i=0;i<pos.count;i++){
   sn = Math.max(sn, ss(0.92,1.0,u)*0.9);                    // summit cap
   c=mix(c, snow, sn);
   col.push(c[0],c[1],c[2]);
-}
+});
 geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
-const peak=new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true}));
+if(Q.get('bake')==='1') bakeTerrain(col);
+}
+peak=new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,flatShading:true}));
 peak.castShadow=true; peak.receiveShadow=true;   // self-shadow for crevice depth
 peak.position.set(CONFIG.posX,CONFIG.posY,0); peak.scale.setScalar(CONFIG.size); peak.rotation.y=CONFIG.spin0; tScene.add(peak);
+}
+buildPeak();
 
-const ready=()=>true;
-function animate(dt){ peak.rotation.y+=CONFIG.rot*(dt||16.667)/16.667; }   // rot is per 60 Hz frame, so the speed doesn't depend on the frame rate
+const ready=()=>!!peak;
+function animate(dt){ if(peak) peak.rotation.y+=CONFIG.rot*(dt||16.667)/16.667; }   // rot is per 60 Hz frame, so the speed doesn't depend on the frame rate
 
 /* ===================== dot-grid pass (transparent output) =====================
    The scene renders into a target with one pixel per dot cell (pixel centre = cell centre), then this pass draws the
