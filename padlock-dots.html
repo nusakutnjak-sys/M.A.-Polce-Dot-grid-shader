@@ -23,7 +23,7 @@ const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFlo
    resumes where it stopped. t0 = seconds already "played" before the still frame.  */
 const __pn=performance.now.bind(performance); let __held=Q.get('hover')==='1', __acc=num('t0',0)*1000, __last=__pn();
 function __now(){ const n=__pn(); if(!__held) __acc+=n-__last; __last=n; return __acc; }
-window.addEventListener('message',e=>{ const d=e.data&&e.data.dots; if(d==='play') __held=false; else if(d==='pause') __held=true; });
+window.addEventListener('message',e=>{ const d=e.data&&e.data.dots; if(d==='play'||d==='pause'){ __now(); __held=d==='pause'; } });   // bring the clock up to date first, so the paused time is never counted
 // the tile's background: white with a pale-blue diagonal wave along the bottom (baked into the old video)
 const WAVE='linear-gradient(166deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 60%,rgba(229,239,246,.9) 78%,#c6ddee 100%)';
 // opened directly (not in an iframe) -> show the tile's white + wave so the cyan dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)

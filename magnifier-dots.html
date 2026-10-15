@@ -22,7 +22,7 @@ const Q=new URLSearchParams(location.search); const num=(k,d)=>{const v=parseFlo
    resumes where it stopped. t0 = seconds already "played" before the still frame.  */
 const __pn=performance.now.bind(performance); let __held=Q.get('hover')==='1', __acc=num('t0',0)*1000, __last=__pn();
 function __now(){ const n=__pn(); if(!__held) __acc+=n-__last; __last=n; return __acc; }
-window.addEventListener('message',e=>{ const d=e.data&&e.data.dots; if(d==='play') __held=false; else if(d==='pause') __held=true; });
+window.addEventListener('message',e=>{ const d=e.data&&e.data.dots; if(d==='play'||d==='pause'){ __now(); __held=d==='pause'; } });   // bring the clock up to date first, so the paused time is never counted
 // opened directly (not in an iframe) -> show the tile's gradient so the white dots are visible; embedded stays transparent (?bg=1 / ?bg=0 to force)
 let framed=true; try{ framed=window.self!==window.top; }catch(e){}
 if(Q.get('bg')==='1'||(!framed&&Q.get('bg')!=='0')) document.documentElement.style.background='linear-gradient(130.796deg,#071231 0%,#0243a9 50%,#759ad0 100%) fixed';
